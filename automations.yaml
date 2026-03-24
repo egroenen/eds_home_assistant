@@ -1082,3 +1082,25 @@
           volume_level: "{{ prior_volume }}"
       - delay: "00:00:30"
   mode: restart
+
+- id: 'solar_optimizer_record'
+  alias: Solar Optimizer - Record Outcomes
+  description: Record today's energy outcomes and update learning parameters
+  triggers:
+    - trigger: time
+      at: "21:30:00"
+  conditions: []
+  actions:
+    - action: shell_command.solar_record
+  mode: single
+
+- id: 'solar_optimizer_nightly'
+  alias: Solar Optimizer - Nightly Plan
+  description: Calculate and write tomorrow's battery charging plan
+  triggers:
+    - trigger: time
+      at: "22:00:00"
+  conditions: []
+  actions:
+    - action: shell_command.solar_optimize
+  mode: single

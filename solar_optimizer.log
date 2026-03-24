@@ -1,0 +1,23 @@
+2026-03-24 20:07:21 [INFO] Initialized default learning parameters
+2026-03-24 20:07:21 [ERROR] HA API error 400: {"message":"Service call requires responses but caller did not ask for responses. Add ?return_response to query parameters."}
+2026-03-24 20:07:21 [WARNING] Could not get weather forecast: HTTP Error 400: Bad Request
+2026-03-24 20:07:21 [WARNING] Unknown weather condition 'clear-night', using 0.6 correction
+2026-03-24 20:07:21 [INFO] Solar forecast: 24.2 kWh, condition: clear-night, cloud: 1.6%, correction: 0.60, adjusted: 14.4 kWh
+2026-03-24 20:07:21 [INFO] Peak consumption: 21.9 kWh, peak solar: 12.3 kWh, deficit: 9.7 kWh
+2026-03-24 20:07:21 [INFO] SOC target: deficit-based=82%, learned-base=60%, final=80%
+2026-03-24 20:07:55 [INFO] Solar forecast: 24.2 kWh, condition: clear-night, cloud: 1.6%, correction: 0.99, adjusted: 24.0 kWh
+2026-03-24 20:07:55 [INFO] Peak consumption: 21.9 kWh, peak solar: 20.4 kWh, deficit: 1.5 kWh
+2026-03-24 20:07:55 [INFO] SOC target: deficit-based=21%, learned-base=60%, final=60%
+2026-03-24 20:08:04 [INFO] Solar forecast: 24.2 kWh, condition: clear-night, cloud: 1.6%, correction: 0.99, adjusted: 24.0 kWh
+2026-03-24 20:08:04 [INFO] Peak consumption: 21.9 kWh, peak solar: 20.4 kWh, deficit: 1.5 kWh
+2026-03-24 20:08:04 [INFO] SOC target: deficit-based=21%, learned-base=60%, final=60%
+2026-03-24 20:08:37 [INFO] Solar forecast: 24.2 kWh, condition: cloudy, cloud: 1.6%, correction: 0.69, adjusted: 16.8 kWh
+2026-03-24 20:08:37 [INFO] Peak consumption: 21.9 kWh, peak solar: 14.3 kWh, deficit: 7.6 kWh
+2026-03-24 20:08:37 [INFO] SOC target: deficit-based=67%, learned-base=60%, final=65%
+2026-03-24 20:09:09 [INFO] Solar forecast: 24.2 kWh, condition: cloudy, cloud: 75%, correction: 0.44, adjusted: 10.6 kWh
+2026-03-24 20:09:09 [INFO] Peak consumption: 21.9 kWh, peak solar: 9.0 kWh, deficit: 12.9 kWh
+2026-03-24 20:09:09 [INFO] SOC target: deficit-based=106%, learned-base=60%, final=100%
+2026-03-24 20:09:26 [INFO] Poll: SOC=81.0%, grid=0.0W, PV=0.0W, load=124.0W
+2026-03-24 20:32:35 [INFO] Solar forecast: 24.2 kWh, condition: cloudy, cloud: 75%, correction: 0.44, adjusted: 10.6 kWh
+2026-03-24 20:32:35 [INFO] Peak consumption: 21.9 kWh, peak solar: 9.0 kWh, deficit: 12.9 kWh
+2026-03-24 20:32:35 [INFO] SOC target: deficit-based=106%, learned-base=60%, final=100%

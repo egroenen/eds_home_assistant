@@ -221,3 +221,26 @@ group:
     entities:
       - light.abl204ha
       - light.abl204ha_2
+
+# Solar battery optimizer
+shell_command:
+  solar_optimize: "cd /config && python3 solar_optimizer.py optimize 2>&1 | tee -a /config/solar_optimizer.log"
+  solar_record: "cd /config && python3 solar_optimizer.py record 2>&1 | tee -a /config/solar_optimizer.log"
+  solar_poll: "cd /config && python3 solar_optimizer.py poll 2>&1 | tee -a /config/solar_optimizer.log"
+
+# Solar optimizer dashboard sensor - reads status JSON
+command_line:
+  - sensor:
+      name: Solar Optimizer Status
+      unique_id: solar_optimizer_status
+      command: "cat /config/solar_optimizer_status.json 2>/dev/null || echo '{}'"
+      value_template: "{{ value_json.plan.overnight_soc | default('--') }}"
+      unit_of_measurement: "%"
+      json_attributes:
+        - updated_at
+        - battery_soc
+        - plan
+        - today
+        - learning
+        - days_of_data
+      scan_interval: 300
