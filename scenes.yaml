@@ -1,0 +1,579 @@
+- id: '1736686837709'
+  name: Front Door Lights On
+  entities:
+    light.front_door_1:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      color_mode: color_temp
+      brightness: 128
+      color_temp_kelvin: 2000
+      color_temp: 500
+      hs_color:
+      - 30.601
+      - 94.547
+      rgb_color:
+      - 255
+      - 137
+      - 14
+      xy_color:
+      - 0.598
+      - 0.383
+      friendly_name: Front door 1
+      supported_features: 0
+      state: 'on'
+    light.front_door_outside_2:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      color_mode: color_temp
+      brightness: 128
+      color_temp_kelvin: 2000
+      color_temp: 500
+      hs_color:
+      - 30.601
+      - 94.547
+      rgb_color:
+      - 255
+      - 137
+      - 14
+      xy_color:
+      - 0.598
+      - 0.383
+      friendly_name: Front door outside 2
+      supported_features: 0
+      state: 'on'
+  icon: mdi:lightbulb
+  metadata: {}
+- id: '1736687265913'
+  name: Front Door Lights Off
+  entities:
+    light.front_door_1:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      color_mode:
+      brightness:
+      color_temp_kelvin:
+      color_temp:
+      hs_color:
+      rgb_color:
+      xy_color:
+      friendly_name: Front door 1
+      supported_features: 0
+      state: 'off'
+    light.front_door_outside_2:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      color_mode:
+      brightness:
+      color_temp_kelvin:
+      color_temp:
+      hs_color:
+      rgb_color:
+      xy_color:
+      friendly_name: Front door outside 2
+      supported_features: 0
+      state: 'off'
+  icon: mdi:lightbulb
+  metadata: {}
+- id: '1736688055454'
+  name: Cinema Lights Dim
+  entities:
+    light.cinema_left_front:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      supported_features: 0
+      color_mode: hs
+      brightness: 8
+      color_temp_kelvin:
+      color_temp:
+      hs_color:
+      - 34
+      - 100
+      rgb_color:
+      - 255
+      - 144
+      - 0
+      xy_color:
+      - 0.591
+      - 0.393
+      friendly_name: Cinema Left Front
+      state: 'on'
+    light.cinema_right_front:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      supported_features: 0
+      color_mode: hs
+      brightness: 8
+      color_temp_kelvin:
+      color_temp:
+      hs_color:
+      - 32
+      - 100
+      rgb_color:
+      - 255
+      - 136
+      - 0
+      xy_color:
+      - 0.601
+      - 0.384
+      friendly_name: Cinema Right Front
+      state: 'on'
+    light.cinema_left_middle:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      supported_features: 0
+      color_mode: hs
+      brightness: 8
+      color_temp_kelvin:
+      color_temp:
+      hs_color:
+      - 30
+      - 100
+      rgb_color:
+      - 255
+      - 128
+      - 0
+      xy_color:
+      - 0.611
+      - 0.375
+      friendly_name: Cinema Left Middle
+      state: 'on'
+    light.cinema_right_middle:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      supported_features: 0
+      color_mode: hs
+      brightness: 8
+      color_temp_kelvin:
+      color_temp:
+      hs_color:
+      - 30
+      - 100
+      rgb_color:
+      - 255
+      - 128
+      - 0
+      xy_color:
+      - 0.611
+      - 0.375
+      friendly_name: Cinema Right Middle
+      state: 'on'
+    light.cinema_left_rear:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      supported_features: 0
+      color_mode: hs
+      brightness: 26
+      color_temp_kelvin:
+      color_temp:
+      hs_color:
+      - 31
+      - 100
+      rgb_color:
+      - 255
+      - 132
+      - 0
+      xy_color:
+      - 0.606
+      - 0.379
+      friendly_name: Cinema Left Rear
+      state: 'on'
+    light.cinema_right_rear:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      supported_features: 0
+      color_mode: hs
+      brightness: 26
+      color_temp_kelvin:
+      color_temp:
+      hs_color:
+      - 29
+      - 100
+      rgb_color:
+      - 255
+      - 123
+      - 0
+      xy_color:
+      - 0.617
+      - 0.37
+      friendly_name: Cinema Right Rear
+      state: 'on'
+  icon: mdi:theater
+  metadata: {}
+- id: '1736688368571'
+  name: Cinema Lights Off
+  entities:
+    light.cinema_left_front:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      supported_features: 0
+      color_mode:
+      brightness:
+      color_temp_kelvin:
+      color_temp:
+      hs_color:
+      rgb_color:
+      xy_color:
+      friendly_name: Cinema Left Front
+      state: 'off'
+    light.cinema_right_front:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      supported_features: 0
+      color_mode:
+      brightness:
+      color_temp_kelvin:
+      color_temp:
+      hs_color:
+      rgb_color:
+      xy_color:
+      friendly_name: Cinema Right Front
+      state: 'off'
+    light.cinema_left_middle:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      supported_features: 0
+      color_mode:
+      brightness:
+      color_temp_kelvin:
+      color_temp:
+      hs_color:
+      rgb_color:
+      xy_color:
+      friendly_name: Cinema Left Middle
+      state: 'off'
+    light.cinema_right_middle:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      supported_features: 0
+      color_mode:
+      brightness:
+      color_temp_kelvin:
+      color_temp:
+      hs_color:
+      rgb_color:
+      xy_color:
+      friendly_name: Cinema Right Middle
+      state: 'off'
+    light.cinema_left_rear:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      supported_features: 0
+      color_mode:
+      brightness:
+      color_temp_kelvin:
+      color_temp:
+      hs_color:
+      rgb_color:
+      xy_color:
+      friendly_name: Cinema Left Rear
+      state: 'off'
+    light.cinema_right_rear:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      supported_features: 0
+      color_mode:
+      brightness:
+      color_temp_kelvin:
+      color_temp:
+      hs_color:
+      rgb_color:
+      xy_color:
+      friendly_name: Cinema Right Rear
+      state: 'off'
+  icon: mdi:lightbulb
+  metadata: {}
+- id: '1736689075360'
+  name: Cinema Accent Blue 25%
+  entities:
+    light.cinema_accent:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      supported_features: 0
+      color_mode: hs
+      brightness: 64
+      color_temp_kelvin:
+      color_temp:
+      hs_color:
+      - 224
+      - 100
+      rgb_color:
+      - 0
+      - 68
+      - 255
+      xy_color:
+      - 0.137
+      - 0.069
+      friendly_name: Cinema accent
+      state: 'on'
+  icon: mdi:theater
+  metadata: {}
+- id: '1736689098622'
+  name: Cinema Accent Blue 100%
+  entities:
+    light.cinema_accent:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      supported_features: 0
+      color_mode: hs
+      brightness: 255
+      color_temp_kelvin:
+      color_temp:
+      hs_color:
+      - 224
+      - 100
+      rgb_color:
+      - 0
+      - 68
+      - 255
+      xy_color:
+      - 0.137
+      - 0.069
+      friendly_name: Cinema accent
+      state: 'on'
+  icon: mdi:theater
+  metadata: {}
+- id: '1744353385038'
+  name: Cinema Lights Bright
+  entities:
+    light.cinema_left_front:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      color_mode: color_temp
+      brightness: 255
+      color_temp_kelvin: 2000
+      color_temp: 500
+      hs_color:
+      - 30.601
+      - 94.547
+      rgb_color:
+      - 255
+      - 137
+      - 14
+      xy_color:
+      - 0.598
+      - 0.383
+      friendly_name: Cinema Left Front
+      supported_features: 0
+      state: 'on'
+    light.cinema_right_front:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      color_mode: color_temp
+      brightness: 255
+      color_temp_kelvin: 2000
+      color_temp: 500
+      hs_color:
+      - 30.601
+      - 94.547
+      rgb_color:
+      - 255
+      - 137
+      - 14
+      xy_color:
+      - 0.598
+      - 0.383
+      friendly_name: Cinema Right Front
+      supported_features: 0
+      state: 'on'
+    light.cinema_left_middle:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      color_mode: color_temp
+      brightness: 255
+      color_temp_kelvin: 2227
+      color_temp: 449
+      hs_color:
+      - 29.702
+      - 83.435
+      rgb_color:
+      - 255
+      - 148
+      - 42
+      xy_color:
+      - 0.575
+      - 0.389
+      friendly_name: Cinema Left Middle
+      supported_features: 0
+      state: 'on'
+    light.cinema_right_middle:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      color_mode: color_temp
+      brightness: 255
+      color_temp_kelvin: 2000
+      color_temp: 500
+      hs_color:
+      - 30.601
+      - 94.547
+      rgb_color:
+      - 255
+      - 137
+      - 14
+      xy_color:
+      - 0.598
+      - 0.383
+      friendly_name: Cinema Right Middle
+      supported_features: 0
+      state: 'on'
+    light.cinema_left_rear:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      color_mode: color_temp
+      brightness: 255
+      color_temp_kelvin: 2000
+      color_temp: 500
+      hs_color:
+      - 30.601
+      - 94.547
+      rgb_color:
+      - 255
+      - 137
+      - 14
+      xy_color:
+      - 0.598
+      - 0.383
+      friendly_name: Cinema Left Rear
+      supported_features: 0
+      state: 'on'
+    light.cinema_right_rear:
+      min_color_temp_kelvin: 2000
+      max_color_temp_kelvin: 6500
+      min_mireds: 153
+      max_mireds: 500
+      supported_color_modes:
+      - color_temp
+      - hs
+      color_mode: color_temp
+      brightness: 255
+      color_temp_kelvin: 2000
+      color_temp: 500
+      hs_color:
+      - 30.601
+      - 94.547
+      rgb_color:
+      - 255
+      - 137
+      - 14
+      xy_color:
+      - 0.598
+      - 0.383
+      friendly_name: Cinema Right Rear
+      supported_features: 0
+      state: 'on'
+  icon: mdi:theater
+  metadata: {}

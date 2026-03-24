@@ -1,0 +1,223 @@
+# Loads default set of integrations. Do not remove.
+default_config:
+
+# Load frontend themes from the themes folder
+frontend:
+  themes: !include_dir_merge_named themes
+  extra_module_url:
+    - /hacsfiles/lovelace-card-mod/card-mod.js?hacstag=190927524410
+
+automation: !include automations.yaml
+script: !include scripts.yaml
+scene: !include scenes.yaml
+tts:
+  - platform: google_translate
+sensor:
+  - platform: feedparser
+    name: Top Stories
+    feed_url: "https://www.nzherald.co.nz/arc/outboundfeeds/rss/curated/78/?outputType=xml&_website=nzh"
+    scan_interval:
+      hours: 1
+    inclusions:
+      - title
+      - link
+      - description
+      - image
+      - published
+    show_topn: 7
+  - platform: feedparser
+    name: NZ News
+    feed_url: "https://www.nzherald.co.nz/arc/outboundfeeds/rss/section/nz/?outputType=xml&_website=nzh"
+    scan_interval:
+      hours: 1
+    inclusions:
+      - title
+      - link
+      - description
+      - image
+      - published
+    show_topn: 10
+  - platform: feedparser
+    name: World News
+    feed_url: "https://www.nzherald.co.nz/arc/outboundfeeds/rss/section/world/?outputType=xml&_website=nzh"
+    scan_interval:
+      hours: 1
+    inclusions:
+      - title
+      - link
+      - description
+      - image
+      - published
+    show_topn: 10
+  - platform: feedparser
+    name: Ars All News
+    feed_url: "https://feeds.arstechnica.com/arstechnica/index"
+    scan_interval:
+      hours: 1
+    inclusions:
+      - title
+      - link
+      - description
+      - image
+      - published
+    show_topn: 10
+
+template:
+  - sensor:
+      - name: Home Temperature
+        unique_id: home_temperature
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state: "{{ state_attr('weather.forecast_home', 'temperature') }}"
+      - name: Home Apparent Temperature
+        unique_id: home_apparent_temperature
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state: "{{ state_attr('weather.forecast_home', 'temperature') }}"
+      - name: Home Relative Humidity
+        unique_id: home_relative_humidity
+        unit_of_measurement: "%"
+        device_class: humidity
+        state: "{{ state_attr('weather.forecast_home', 'humidity') }}"
+      - name: Home Pressure
+        unique_id: home_pressure
+        unit_of_measurement: "hPa"
+        device_class: pressure
+        state: "{{ state_attr('weather.forecast_home', 'pressure') }}"
+      - name: Home Wind Speed
+        unique_id: home_wind_speed
+        unit_of_measurement: "km/h"
+        state: "{{ state_attr('weather.forecast_home', 'wind_speed') }}"
+      - name: Home Wind Gust
+        unique_id: home_wind_gust
+        unit_of_measurement: "km/h"
+        state: >-
+          {% set fc = state_attr('weather.forecast_home', 'forecast') %}
+          {% if fc and fc[0] is defined and fc[0].wind_gust is defined %}
+            {{ fc[0].wind_gust }}
+          {% else %}
+            {{ state_attr('weather.forecast_home', 'wind_speed') }}
+          {% endif %}
+      - name: Home Wind Direction
+        unique_id: home_wind_direction
+        unit_of_measurement: "°"
+        state: "{{ state_attr('weather.forecast_home', 'wind_bearing') }}"
+      - name: Home Rain Possible Today
+        unique_id: home_rain_possible_today
+        unit_of_measurement: "mm"
+        device_class: precipitation
+        state: >-
+          {% set fc = state_attr('weather.forecast_home', 'forecast') %}
+          {% if fc and fc[0] is defined and fc[0].precipitation is defined %}
+            {{ fc[0].precipitation }}
+          {% else %}
+            {{ 0 }}
+          {% endif %}
+      - name: Home Weather Description
+        unique_id: home_weather_description
+        state: "{{ states('weather.forecast_home') }}"
+      - name: Home Rain Today
+        unique_id: home_rain_today
+        unit_of_measurement: "%"
+        state: >-
+          {% set fc = state_attr('weather.forecast_home', 'forecast') %}
+          {% if fc and fc[0] is defined and fc[0].precipitation_probability is defined %}
+            {{ fc[0].precipitation_probability }}
+          {% else %}
+            {{ 0 }}
+          {% endif %}
+      - name: Home UV Index
+        unique_id: home_uv_index
+        state: >-
+          {% set fc = state_attr('weather.forecast_home', 'forecast') %}
+          {% if fc and fc[0] is defined and fc[0].uv_index is defined %}
+            {{ fc[0].uv_index }}
+          {% else %}
+            {{ 0 }}
+          {% endif %}
+      - name: Home Clothes Drying Time Morning
+        unique_id: home_clothes_drying_time_morning
+        state: >-
+          {% set temp = states('sensor.home_temperature') | float(0) %}
+          {% set humidity = states('sensor.home_relative_humidity') | float(0) %}
+          {% set wind = states('sensor.home_wind_speed') | float(0) %}
+          {% set uv = states('sensor.home_uv_index') | float(0) %}
+          {% set score = (temp * 1.1) + (wind * 0.9) + (uv * 0.6) - (humidity * 0.5) %}
+          {% if score >= 20 %}
+            Quick (2-3 hrs)
+          {% elif score >= 12 %}
+            Moderate (3-5 hrs)
+          {% elif score >= 6 %}
+            Slow (5-7 hrs)
+          {% else %}
+            Poor (7+ hrs)
+          {% endif %}
+        attributes:
+          period: morning
+          score: >-
+            {% set temp = states('sensor.home_temperature') | float(0) %}
+            {% set humidity = states('sensor.home_relative_humidity') | float(0) %}
+            {% set wind = states('sensor.home_wind_speed') | float(0) %}
+            {% set uv = states('sensor.home_uv_index') | float(0) %}
+            {{ (temp * 1.1) + (wind * 0.9) + (uv * 0.6) - (humidity * 0.5) }}
+      - name: Home Clothes Drying Time Afternoon
+        unique_id: home_clothes_drying_time_afternoon
+        state: >-
+          {% set temp = states('sensor.home_temperature') | float(0) %}
+          {% set humidity = states('sensor.home_relative_humidity') | float(0) %}
+          {% set wind = states('sensor.home_wind_speed') | float(0) %}
+          {% set uv = states('sensor.home_uv_index') | float(0) %}
+          {% set score = (temp * 1.2) + (wind * 0.9) + (uv * 0.7) - (humidity * 0.45) %}
+          {% if score >= 22 %}
+            Quick (2-3 hrs)
+          {% elif score >= 14 %}
+            Moderate (3-5 hrs)
+          {% elif score >= 8 %}
+            Slow (5-7 hrs)
+          {% else %}
+            Poor (7+ hrs)
+          {% endif %}
+        attributes:
+          period: afternoon
+          score: >-
+            {% set temp = states('sensor.home_temperature') | float(0) %}
+            {% set humidity = states('sensor.home_relative_humidity') | float(0) %}
+            {% set wind = states('sensor.home_wind_speed') | float(0) %}
+            {% set uv = states('sensor.home_uv_index') | float(0) %}
+            {{ (temp * 1.2) + (wind * 0.9) + (uv * 0.7) - (humidity * 0.45) }}
+      - name: Inverter PV Power
+        unique_id: inverter_pv_power
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+        state: >-
+          {{ (states('sensor.inverter_pv1_power') | float(0))
+             + (states('sensor.inverter_pv2_power') | float(0))
+             + (states('sensor.inverter_pv3_power') | float(0)) }}
+
+light:
+  - platform: group
+    name: Front Door Lights
+    unique_id: front_door_lights
+    entities:
+      - light.front_door_1
+      - light.front_door_outside_2
+
+group:
+  all_outside_lights:
+    name: All Outside Lights
+    entities:
+      - light.front_door_1
+      - light.front_door_outside_2
+      - group.garage_lights
+      - switch.bedroom_outside_switch_switch_1
+      - switch.bedroom_outside_switch_switch_2
+      - switch.bedroom_outside_switch_switch_3
+      - switch.outside_back_garden_switch_switch_1
+      - switch.outside_back_garden_switch_switch_2
+      - light.laundry_outside_light
+  garage_lights:
+    name: Garage Lights
+    entities:
+      - light.abl204ha
+      - light.abl204ha_2

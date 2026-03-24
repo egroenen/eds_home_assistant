@@ -1,0 +1,1084 @@
+- id: '1736250991869'
+  alias: Spa turn off
+  description: ''
+  triggers:
+  - type: turned_off
+    device_id: 0a35c787ce0941df5c30713465f55bfd
+    entity_id: f84683758475243c591c9d0ba5d18035
+    domain: switch
+    trigger: device
+  conditions: []
+  actions:
+  - type: turn_off
+    device_id: e448589050d23372792844b489c9507e
+    entity_id: 1def4157b0f41e48aad74c9e19b76d9a
+    domain: switch
+  - type: turn_off
+    device_id: 4fe8eb1860a560ae4c27ecba8216c7b5
+    entity_id: 1d8e9c88c227efd079cd292be44e42ab
+    domain: switch
+  - type: turn_off
+    device_id: 2963930a5cf0e283b732ba1e4c5b1288
+    entity_id: f78233059f5f1f98b3dd9156f1e15770
+    domain: light
+  mode: single
+- id: '1736429728882'
+  alias: River extractor fan on
+  description: ''
+  triggers:
+  - type: temperature
+    device_id: 75bcf84d1a63452271cea23f7435464f
+    entity_id: 33ace5d0e67f5c2ca84954ad49634be0
+    domain: sensor
+    trigger: device
+    above: 27
+  conditions:
+  - condition: device
+    type: is_off
+    device_id: 0458d84a62c32f1a35e9b8961fce2bec
+    entity_id: c9d2b06d363d32c2d9cd0de024e4f9b9
+    domain: switch
+  actions:
+  - type: turn_on
+    device_id: 0458d84a62c32f1a35e9b8961fce2bec
+    entity_id: c9d2b06d363d32c2d9cd0de024e4f9b9
+    domain: switch
+  mode: single
+- id: '1736429859550'
+  alias: River extractor fan off
+  description: ''
+  triggers:
+  - type: temperature
+    device_id: 75bcf84d1a63452271cea23f7435464f
+    entity_id: 33ace5d0e67f5c2ca84954ad49634be0
+    domain: sensor
+    trigger: device
+    below: 26
+  conditions:
+  - condition: device
+    type: is_on
+    device_id: 0458d84a62c32f1a35e9b8961fce2bec
+    entity_id: c9d2b06d363d32c2d9cd0de024e4f9b9
+    domain: switch
+  actions:
+  - type: turn_off
+    device_id: 0458d84a62c32f1a35e9b8961fce2bec
+    entity_id: c9d2b06d363d32c2d9cd0de024e4f9b9
+    domain: switch
+  mode: single
+- id: '1736472210145'
+  alias: Spa On
+  description: ''
+  triggers:
+  - type: turned_on
+    device_id: 0a35c787ce0941df5c30713465f55bfd
+    entity_id: f84683758475243c591c9d0ba5d18035
+    domain: switch
+    trigger: device
+  conditions: []
+  actions:
+  - type: turn_on
+    device_id: e448589050d23372792844b489c9507e
+    entity_id: 1def4157b0f41e48aad74c9e19b76d9a
+    domain: switch
+  - type: turn_on
+    device_id: 4fe8eb1860a560ae4c27ecba8216c7b5
+    entity_id: 1d8e9c88c227efd079cd292be44e42ab
+    domain: switch
+  - type: turn_on
+    device_id: 2963930a5cf0e283b732ba1e4c5b1288
+    entity_id: f78233059f5f1f98b3dd9156f1e15770
+    domain: light
+  mode: single
+- id: '1736579231168'
+  alias: Cinema Welcome
+  description: ''
+  triggers:
+  - type: turned_on
+    device_id: 9527ee2c73f2a5059ee90bb5875e03f2
+    entity_id: 6fedb7135245fb2770ba41d1f8981e99
+    domain: switch
+    trigger: device
+  conditions: []
+  actions:
+  - type: turn_on
+    device_id: 9527ee2c73f2a5059ee90bb5875e03f2
+    entity_id: 5e55fe9b0cc4558cfa11eb26477d3b4a
+    domain: switch
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id: scene.cinema_accent_blue_50
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id: scene.projector_on
+  - device_id: ea4e2c72310bcb0796b3db6d2c14e173
+    domain: cover
+    entity_id: 467ec322b7b5d9ce84ef26221f2a68c1
+    type: close
+  - device_id: 772b4da13023b3594fcd00a25d359ba0
+    domain: cover
+    entity_id: 99fc97b02681338e7410c4a8ac3be87c
+    type: close
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id: scene.projector_screen_down
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id: scene.cinema_amp_on
+  - type: turn_on
+    device_id: ceaa263737b83c08446205ed0512c5b7
+    entity_id: 8242f7571ff8142e906dbc00cd10b74b
+    domain: remote
+  mode: single
+- id: '1736579402742'
+  alias: New automation
+  description: ''
+  triggers:
+  - type: turned_off
+    device_id: 9527ee2c73f2a5059ee90bb5875e03f2
+    entity_id: 6fedb7135245fb2770ba41d1f8981e99
+    domain: switch
+    trigger: device
+  conditions: []
+  actions:
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id: scene.cinema_accent_blue_100
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id: scene.projector_off
+  - delay:
+      hours: 0
+      minutes: 0
+      seconds: 5
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id: scene.projector_screen_up
+  - device_id: 772b4da13023b3594fcd00a25d359ba0
+    domain: cover
+    entity_id: 99fc97b02681338e7410c4a8ac3be87c
+    type: open
+  - device_id: ea4e2c72310bcb0796b3db6d2c14e173
+    domain: cover
+    entity_id: 467ec322b7b5d9ce84ef26221f2a68c1
+    type: open
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id: scene.cinema_amp_off
+  - type: turn_off
+    device_id: 9527ee2c73f2a5059ee90bb5875e03f2
+    entity_id: 5e55fe9b0cc4558cfa11eb26477d3b4a
+    domain: switch
+  - delay:
+      hours: 0
+      minutes: 0
+      seconds: 30
+  - type: turn_off
+    device_id: 0fdeac1815d2452f65c820f8de218755
+    entity_id: 55a40e4873fe79c829ca9ae6e232496e
+    domain: light
+  mode: single
+- id: '1736684965822'
+  alias: Front Door Welcome Night
+  description: ''
+  triggers:
+  - type: turned_on
+    device_id: ed5cfce2225f02dee5b6445edec5934d
+    entity_id: a881a37291ba95c6b764d0eb6340dc96
+    domain: binary_sensor
+    trigger: device
+  conditions:
+  - condition: sun
+    after: sunset
+    before: sunrise
+  - condition: device
+    type: is_off
+    device_id: 647ac545ca523cd00ebb4351f5bb1107
+    entity_id: 263c8cf70bd3054ae4f3ed8bb522e80b
+    domain: light
+  actions:
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id: scene.front_door_lights_on
+  - delay:
+      hours: 0
+      minutes: 5
+      seconds: 0
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id: scene.front_door_lights_off
+  mode: single
+- id: '1739991000000'
+  alias: Garage lights on at sunset
+  description: ''
+  triggers:
+  - platform: sun
+    event: sunset
+  conditions: []
+  actions:
+  - action: light.turn_on
+    target:
+      entity_id: group.garage_lights
+    data:
+      brightness_pct: 50
+      color_temp_kelvin: 2450
+  mode: single
+- id: '1739991100000'
+  alias: Garage lights off weeknights
+  description: ''
+  triggers:
+  - platform: time
+    at: '22:30:00'
+  conditions:
+  - condition: time
+    weekday:
+    - mon
+    - tue
+    - wed
+    - thu
+    - fri
+  actions:
+  - action: light.turn_off
+    target:
+      entity_id: group.garage_lights
+  mode: single
+- id: '1739991200000'
+  alias: Garage lights off Friday and Saturday
+  description: ''
+  triggers:
+  - platform: time
+    at: '23:30:00'
+  conditions:
+  - condition: time
+    weekday:
+    - fri
+    - sat
+  actions:
+  - action: light.turn_off
+    target:
+      entity_id: group.garage_lights
+  mode: single
+- id: '1740000000000'
+  alias: Garage lights on for person detected when dark
+  description: ''
+  triggers:
+  - platform: state
+    entity_id: binary_sensor.front_garage_bullet_person_detected
+    to: 'on'
+  conditions:
+  - condition: state
+    entity_id: binary_sensor.g6_bullet_is_dark
+    state: 'on'
+  actions:
+  - action: light.turn_on
+    target:
+      entity_id: group.garage_lights
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: >-
+              {% set t = now().time() %}
+              {% set cutoff = today_at('22:30').time() %}
+              {% if t >= cutoff %}
+                {{ now().weekday() in [6, 0, 1, 2, 3] }}
+              {% else %}
+                {{ now().weekday() in [0, 1, 2, 3, 4] }}
+              {% endif %}
+        sequence:
+          - delay: '00:05:00'
+          - action: light.turn_off
+            target:
+              entity_id: group.garage_lights
+      - conditions:
+          - condition: template
+            value_template: >-
+              {% set t = now().time() %}
+              {% set cutoff = today_at('23:30').time() %}
+              {% if t >= cutoff %}
+                {{ now().weekday() in [4, 5] }}
+              {% else %}
+                {{ now().weekday() in [5, 6] }}
+              {% endif %}
+        sequence:
+          - delay: '00:05:00'
+          - action: light.turn_off
+            target:
+              entity_id: group.garage_lights
+  mode: single
+- id: '1736687475312'
+  alias: Sunset Front Door
+  description: ''
+  triggers:
+  - trigger: sun
+    event: sunset
+    offset: 0
+  conditions: []
+  actions:
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id: scene.front_door_lights_on
+  mode: single
+- id: '1736687526670'
+  alias: 10pm lights out
+  description: ''
+  triggers:
+  - trigger: time
+    at: '22:00:00'
+  conditions: []
+  actions:
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id: scene.front_door_lights_off
+  - type: turn_off
+    device_id: 0a35c787ce0941df5c30713465f55bfd
+    entity_id: f84683758475243c591c9d0ba5d18035
+    domain: switch
+  mode: single
+- id: '1736688152989'
+  alias: Cinema Switch 1 Lights Dim
+  description: ''
+  triggers:
+  - type: turned_on
+    device_id: 9527ee2c73f2a5059ee90bb5875e03f2
+    entity_id: 5e55fe9b0cc4558cfa11eb26477d3b4a
+    domain: switch
+    trigger: device
+  conditions: []
+  actions:
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id: scene.cinema_lights_dim
+  mode: single
+- id: '1736688518074'
+  alias: Cinema Lights Off
+  description: ''
+  triggers:
+  - type: turned_off
+    device_id: 9527ee2c73f2a5059ee90bb5875e03f2
+    entity_id: 5e55fe9b0cc4558cfa11eb26477d3b4a
+    domain: switch
+    trigger: device
+  conditions:
+  - condition: device
+    type: is_off
+    device_id: 9527ee2c73f2a5059ee90bb5875e03f2
+    entity_id: 9771f3192c4fe1202d957fcf474728cf
+    domain: switch
+  actions:
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id: scene.cinema_lights_off
+  mode: single
+- id: '1736798042796'
+  alias: Sunset spa lights on
+  description: ''
+  triggers:
+  - trigger: sun
+    event: sunset
+    offset: 0
+  conditions: []
+  actions:
+  - type: turn_on
+    device_id: 0a35c787ce0941df5c30713465f55bfd
+    entity_id: f84683758475243c591c9d0ba5d18035
+    domain: switch
+  mode: single
+- id: '1736798149039'
+  alias: Midnight spa lights off
+  description: ''
+  triggers:
+  - trigger: time
+    at: 00:00:00
+  conditions: []
+  actions:
+  - action: automation.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id: automation.spa_turn_off
+  mode: single
+- id: '1736800000001'
+  alias: Front Door TTS Person Detected
+  description: ''
+  triggers:
+  - platform: state
+    entity_id: binary_sensor.front_door_person_detected
+    to: 'on'
+  conditions:
+  - condition: template
+    value_template: >-
+      {{ (as_timestamp(now()) -
+          (as_timestamp(state_attr('automation.front_door_tts_person_detected', 'last_triggered')) | default(0))) > 120 }}
+  variables:
+    phrases: !include tts_phrases.yaml
+    message: "{{ phrases | random }}"
+    speaker: media_player.front_door_speaker
+    day_volume: 0.8
+    night_volume: 0.5
+    prior_volume: "{{ state_attr(speaker, 'volume_level') | default(0.5) }}"
+  actions:
+  - choose:
+    - conditions:
+      - condition: time
+        after: "21:00:00"
+        before: "10:00:00"
+      sequence:
+      - action: media_player.volume_set
+        data:
+          entity_id: "{{ speaker }}"
+          volume_level: "{{ night_volume }}"
+      - delay: "00:00:01"
+      - action: tts.speak
+        target:
+          entity_id: tts.piper
+        data:
+          media_player_entity_id: "{{ speaker }}"
+          message: "{{ message }}"
+          options:
+            voice: en_GB-jenny_dioco-medium
+      - delay: "00:00:01"
+      - action: media_player.volume_set
+        data:
+          entity_id: "{{ speaker }}"
+          volume_level: "{{ prior_volume }}"
+    default:
+    - action: media_player.volume_set
+      data:
+        entity_id: "{{ speaker }}"
+        volume_level: "{{ day_volume }}"
+    - delay: "00:00:01"
+    - action: tts.speak
+      target:
+        entity_id: tts.piper
+      data:
+        media_player_entity_id: "{{ speaker }}"
+        message: "{{ message }}"
+        options:
+          voice: en_GB-jenny_dioco-medium
+  mode: single
+- id: '1736925300941'
+  alias: Mirror heater with fan
+  description: ''
+  triggers:
+  - type: turned_on
+    device_id: 48fa60ea1baf87bb000327f4e2175d38
+    entity_id: d1966089f69ca2b71812bfeac126d6ad
+    domain: switch
+    trigger: device
+  conditions: []
+  actions:
+  - type: turn_on
+    device_id: 48fa60ea1baf87bb000327f4e2175d38
+    entity_id: 61b2b52eec62314c602ee8466aea9aac
+    domain: switch
+  mode: single
+- id: '1736936877774'
+  alias: Turn on en-suite fan
+  description: ''
+  triggers: []
+  conditions:
+  - condition: state
+    entity_id: switch.en_suite_light_switch_switch_1
+    state: 'on'
+  actions:
+  - type: turn_on
+    device_id: 48fa60ea1baf87bb000327f4e2175d38
+    entity_id: d1966089f69ca2b71812bfeac126d6ad
+    domain: switch
+  mode: single
+- id: '1736937210070'
+  alias: En-suite fan turn on part 2
+  description: ''
+  triggers:
+  - type: turned_on
+    device_id: 48fa60ea1baf87bb000327f4e2175d38
+    entity_id: 721ab4f3e8919fa47ae133963b235d02
+    domain: switch
+    trigger: device
+  conditions: []
+  actions:
+  - delay:
+      hours: 0
+      minutes: 1
+      seconds: 0
+  - action: automation.trigger
+    metadata: {}
+    data:
+      skip_condition: false
+    target:
+      entity_id: automation.turn_on_en_suite_fan
+  mode: single
+- id: '1736944219425'
+  alias: Toilet light Auto off
+  description: ''
+  triggers:
+  - type: turned_on
+    device_id: a9f9ec3f91ac14b624e10698a3a06c5d
+    entity_id: 4fe6873411a4f271f6814c5653242350
+    domain: light
+    trigger: device
+    for:
+      hours: 0
+      minutes: 20
+      seconds: 0
+  conditions: []
+  actions:
+  - type: turn_off
+    device_id: a9f9ec3f91ac14b624e10698a3a06c5d
+    entity_id: 4fe6873411a4f271f6814c5653242350
+    domain: light
+  mode: single
+- id: '1740892071464'
+  alias: Outside garden lights synchronised
+  description: ''
+  triggers:
+  - type: turned_on
+    device_id: 571a7b340c07c3f13366e471f56d5b4a
+    entity_id: 3db9bbb0e9afb309293f26d472e9fd08
+    domain: switch
+    trigger: device
+  conditions:
+  - condition: device
+    type: is_off
+    device_id: 0a35c787ce0941df5c30713465f55bfd
+    entity_id: b0adddace5217deb7e24bdeaa5f741e1
+    domain: switch
+  actions:
+  - type: turn_on
+    device_id: 0a35c787ce0941df5c30713465f55bfd
+    entity_id: b0adddace5217deb7e24bdeaa5f741e1
+    domain: switch
+  mode: single
+- id: '1740892361899'
+  alias: Outside garden lights synchronised Lounge Off
+  description: ''
+  triggers:
+  - type: turned_off
+    device_id: 571a7b340c07c3f13366e471f56d5b4a
+    entity_id: 3db9bbb0e9afb309293f26d472e9fd08
+    domain: switch
+    trigger: device
+  conditions:
+  - condition: device
+    type: is_on
+    device_id: 0a35c787ce0941df5c30713465f55bfd
+    entity_id: b0adddace5217deb7e24bdeaa5f741e1
+    domain: switch
+  actions:
+  - type: turn_off
+    device_id: 0a35c787ce0941df5c30713465f55bfd
+    entity_id: b0adddace5217deb7e24bdeaa5f741e1
+    domain: switch
+  mode: single
+- id: '1740892613591'
+  alias: Outside garden lights synchronised Bedroom On
+  description: ''
+  triggers:
+  - type: turned_on
+    device_id: 0a35c787ce0941df5c30713465f55bfd
+    entity_id: b0adddace5217deb7e24bdeaa5f741e1
+    domain: switch
+    trigger: device
+  conditions:
+  - condition: device
+    type: is_off
+    device_id: 571a7b340c07c3f13366e471f56d5b4a
+    entity_id: 3db9bbb0e9afb309293f26d472e9fd08
+    domain: switch
+  actions:
+  - type: turn_on
+    device_id: 571a7b340c07c3f13366e471f56d5b4a
+    entity_id: 3db9bbb0e9afb309293f26d472e9fd08
+    domain: switch
+  mode: single
+- id: '1740892710192'
+  alias: Outside garden lights synchronised Bedroom Off
+  description: ''
+  triggers:
+  - type: turned_off
+    device_id: 0a35c787ce0941df5c30713465f55bfd
+    entity_id: b0adddace5217deb7e24bdeaa5f741e1
+    domain: switch
+    trigger: device
+  conditions:
+  - condition: device
+    type: is_on
+    device_id: 571a7b340c07c3f13366e471f56d5b4a
+    entity_id: 3db9bbb0e9afb309293f26d472e9fd08
+    domain: switch
+  actions:
+  - type: turn_off
+    device_id: 571a7b340c07c3f13366e471f56d5b4a
+    entity_id: 3db9bbb0e9afb309293f26d472e9fd08
+    domain: switch
+  mode: single
+- id: '1741998178698'
+  alias: 'Lounge Light Switch to Kitchen Switch '
+  description: ''
+  triggers:
+  - type: turned_on
+    device_id: 4a01529eded3c3958bf22c0b940d1165
+    entity_id: c3cf88432817bed3d0577973d6d1557f
+    domain: switch
+    trigger: device
+  conditions:
+  - condition: device
+    type: is_off
+    device_id: 063b98264725313d3a8e62884503913b
+    entity_id: 0753b6d704c09b150132798469ab6f30
+    domain: switch
+  actions:
+  - type: turn_on
+    device_id: 063b98264725313d3a8e62884503913b
+    entity_id: 0753b6d704c09b150132798469ab6f30
+    domain: switch
+  mode: single
+- id: '1741998282857'
+  alias: Lounge Light Switch to Kitchen Switch Off
+  description: ''
+  triggers:
+  - type: turned_off
+    device_id: 4a01529eded3c3958bf22c0b940d1165
+    entity_id: c3cf88432817bed3d0577973d6d1557f
+    domain: switch
+    trigger: device
+  conditions:
+  - condition: device
+    type: is_on
+    device_id: 063b98264725313d3a8e62884503913b
+    entity_id: 0753b6d704c09b150132798469ab6f30
+    domain: switch
+  actions:
+  - type: turn_off
+    device_id: 063b98264725313d3a8e62884503913b
+    entity_id: 0753b6d704c09b150132798469ab6f30
+    domain: switch
+  mode: single
+- id: '1741998354833'
+  alias: Dining Light Switch to Kitchen Switch
+  description: ''
+  triggers:
+  - type: turned_on
+    device_id: 4a01529eded3c3958bf22c0b940d1165
+    entity_id: 6f6611716a02565415b96962feeed412
+    domain: switch
+    trigger: device
+  conditions:
+  - condition: device
+    type: is_off
+    device_id: 063b98264725313d3a8e62884503913b
+    entity_id: 45177587c5a41d21dd80b38d19a1068e
+    domain: switch
+  actions:
+  - type: turn_on
+    device_id: 063b98264725313d3a8e62884503913b
+    entity_id: 45177587c5a41d21dd80b38d19a1068e
+    domain: switch
+  mode: single
+- id: '1741998417392'
+  alias: Dining Light Switch to Kitchen Switch Off
+  description: ''
+  triggers:
+  - type: turned_off
+    device_id: 4a01529eded3c3958bf22c0b940d1165
+    entity_id: 6f6611716a02565415b96962feeed412
+    domain: switch
+    trigger: device
+  conditions:
+  - condition: device
+    type: is_on
+    device_id: 063b98264725313d3a8e62884503913b
+    entity_id: 45177587c5a41d21dd80b38d19a1068e
+    domain: switch
+  actions:
+  - type: turn_off
+    device_id: 063b98264725313d3a8e62884503913b
+    entity_id: 45177587c5a41d21dd80b38d19a1068e
+    domain: switch
+  mode: single
+- id: '1741998819066'
+  alias: Lounge Light Kitchen Switch On
+  description: ''
+  triggers:
+  - type: turned_on
+    device_id: 063b98264725313d3a8e62884503913b
+    entity_id: 0753b6d704c09b150132798469ab6f30
+    domain: switch
+    trigger: device
+  conditions:
+  - condition: device
+    type: is_off
+    device_id: 4a01529eded3c3958bf22c0b940d1165
+    entity_id: c3cf88432817bed3d0577973d6d1557f
+    domain: switch
+  actions:
+  - type: turn_on
+    device_id: 4a01529eded3c3958bf22c0b940d1165
+    entity_id: c3cf88432817bed3d0577973d6d1557f
+    domain: switch
+  mode: single
+- id: '1741998863046'
+  alias: Lounge Light Kitchen Switch Off
+  description: ''
+  triggers:
+  - type: turned_off
+    device_id: 063b98264725313d3a8e62884503913b
+    entity_id: 0753b6d704c09b150132798469ab6f30
+    domain: switch
+    trigger: device
+  conditions:
+  - condition: device
+    type: is_on
+    device_id: 4a01529eded3c3958bf22c0b940d1165
+    entity_id: c3cf88432817bed3d0577973d6d1557f
+    domain: switch
+  actions:
+  - type: turn_off
+    device_id: 4a01529eded3c3958bf22c0b940d1165
+    entity_id: c3cf88432817bed3d0577973d6d1557f
+    domain: switch
+  mode: single
+- id: '1741998904196'
+  alias: Dining Light Kitchen Switch On
+  description: ''
+  triggers:
+  - type: turned_on
+    device_id: 063b98264725313d3a8e62884503913b
+    entity_id: 45177587c5a41d21dd80b38d19a1068e
+    domain: switch
+    trigger: device
+  conditions:
+  - condition: device
+    type: is_off
+    device_id: 4a01529eded3c3958bf22c0b940d1165
+    entity_id: 6f6611716a02565415b96962feeed412
+    domain: switch
+  actions:
+  - type: turn_on
+    device_id: 4a01529eded3c3958bf22c0b940d1165
+    entity_id: 6f6611716a02565415b96962feeed412
+    domain: switch
+  mode: single
+- id: '1741998935698'
+  alias: Lounge Light Kitchen Switch Off
+  description: ''
+  triggers:
+  - type: turned_off
+    device_id: 063b98264725313d3a8e62884503913b
+    entity_id: 45177587c5a41d21dd80b38d19a1068e
+    domain: switch
+    trigger: device
+  conditions:
+  - condition: device
+    type: is_on
+    device_id: 4a01529eded3c3958bf22c0b940d1165
+    entity_id: 6f6611716a02565415b96962feeed412
+    domain: switch
+  actions:
+  - type: turn_off
+    device_id: 4a01529eded3c3958bf22c0b940d1165
+    entity_id: 6f6611716a02565415b96962feeed412
+    domain: switch
+  mode: single
+- id: '1742898917764'
+  alias: Spa off at 6am (expensive power)
+  description: ''
+  triggers:
+  - trigger: time
+    at: 06:00:00
+  conditions: []
+  actions:
+  - type: turn_off
+    device_id: 3e709b26e1ce39b666d66a905c7d4170
+    entity_id: 05d48457c9d2f5a3df2237dd0af2798e
+    domain: switch
+  mode: single
+- id: '1742898991754'
+  alias: Spa on 11pm (cheap power)
+  description: ''
+  triggers:
+  - trigger: time
+    at: '23:00:00'
+  - trigger: time
+    at: '22:02:00'
+  conditions: []
+  actions:
+  - type: turn_on
+    device_id: 3e709b26e1ce39b666d66a905c7d4170
+    entity_id: 05d48457c9d2f5a3df2237dd0af2798e
+    domain: switch
+  mode: single
+- id: '1743155064938'
+  alias: Automatic Laundry light
+  description: ''
+  triggers:
+  - type: turned_on
+    device_id: 2e2b6745e116f8c8c1cb21427ba01636
+    entity_id: 0f73b81511c3a7c064106a3746b21958
+    domain: binary_sensor
+    trigger: device
+  conditions:
+  - condition: sun
+    after: sunset
+    before: sunrise
+  - condition: device
+    type: is_off
+    device_id: 2b1886284645fef79591e6afdb2bbc66
+    entity_id: e486fa7f1382831213a38b1347e547f8
+    domain: light
+  actions:
+  - type: turn_on
+    device_id: 2b1886284645fef79591e6afdb2bbc66
+    entity_id: e486fa7f1382831213a38b1347e547f8
+    domain: light
+    brightness_pct: 100
+  - delay:
+      hours: 0
+      minutes: 5
+      seconds: 0
+  - type: turn_off
+    device_id: 2b1886284645fef79591e6afdb2bbc66
+    entity_id: e486fa7f1382831213a38b1347e547f8
+    domain: light
+  mode: single
+- id: '1743312675375'
+  alias: Hallway 1 full radar
+  description: ''
+  triggers:
+  - type: occupied
+    device_id: 0c11ca469b1c439f43a9cc535c6682cf
+    entity_id: bd34d27a37560bd5e1cb90589348dd36
+    domain: binary_sensor
+    trigger: device
+  - type: motion
+    device_id: 7dc11fd1a170c3dd38a6f90a16a2e146
+    entity_id: 13d999e3374fd8597c9144115f1caec0
+    domain: binary_sensor
+    trigger: device
+  conditions: []
+  actions:
+  - type: turn_on
+    device_id: 7b655a603797e9c06aa9448c6bbaade9
+    entity_id: c3cdd32b78a96a23c5aa7d583acb7249
+    domain: light
+    brightness_pct: 60
+  - delay:
+      hours: 0
+      minutes: 10
+      seconds: 0
+      milliseconds: 0
+  - type: turn_off
+    device_id: 7b655a603797e9c06aa9448c6bbaade9
+    entity_id: c3cdd32b78a96a23c5aa7d583acb7249
+    domain: light
+  mode: single
+- id: '1744353246568'
+  alias: Cinema Lights Bright
+  description: ''
+  triggers:
+  - type: turned_on
+    device_id: 9527ee2c73f2a5059ee90bb5875e03f2
+    entity_id: 9771f3192c4fe1202d957fcf474728cf
+    domain: switch
+    trigger: device
+  conditions: []
+  actions:
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id: scene.cinema_lights_bright
+  - type: turn_on
+    device_id: 0fdeac1815d2452f65c820f8de218755
+    entity_id: 55a40e4873fe79c829ca9ae6e232496e
+    domain: light
+    brightness_pct: 100
+  mode: single
+- id: '1744362084727'
+  alias: Cinema lights bright off
+  description: ''
+  triggers:
+  - type: turned_off
+    device_id: 9527ee2c73f2a5059ee90bb5875e03f2
+    entity_id: 9771f3192c4fe1202d957fcf474728cf
+    domain: switch
+    trigger: device
+  conditions:
+  - condition: device
+    type: is_off
+    device_id: 9527ee2c73f2a5059ee90bb5875e03f2
+    entity_id: 5e55fe9b0cc4558cfa11eb26477d3b4a
+    domain: switch
+  actions:
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id: scene.cinema_lights_off
+  - type: turn_off
+    device_id: 0fdeac1815d2452f65c820f8de218755
+    entity_id: 55a40e4873fe79c829ca9ae6e232496e
+    domain: light
+  mode: single
+- id: '1744362241474'
+  alias: Cinema lights toggle dim and bright
+  description: ''
+  triggers:
+  - type: turned_on
+    device_id: 9527ee2c73f2a5059ee90bb5875e03f2
+    entity_id: 5e55fe9b0cc4558cfa11eb26477d3b4a
+    domain: switch
+    trigger: device
+  conditions:
+  - condition: device
+    type: is_on
+    device_id: 9527ee2c73f2a5059ee90bb5875e03f2
+    entity_id: 9771f3192c4fe1202d957fcf474728cf
+    domain: switch
+  actions:
+  - type: turn_off
+    device_id: 9527ee2c73f2a5059ee90bb5875e03f2
+    entity_id: 9771f3192c4fe1202d957fcf474728cf
+    domain: switch
+  mode: single
+- id: '1744362317738'
+  alias: Cinema lights toggle bright and dim
+  description: ''
+  triggers:
+  - type: turned_on
+    device_id: 9527ee2c73f2a5059ee90bb5875e03f2
+    entity_id: 9771f3192c4fe1202d957fcf474728cf
+    domain: switch
+    trigger: device
+  conditions:
+  - condition: device
+    type: is_on
+    device_id: 9527ee2c73f2a5059ee90bb5875e03f2
+    entity_id: 5e55fe9b0cc4558cfa11eb26477d3b4a
+    domain: switch
+  actions:
+  - type: turn_off
+    device_id: 9527ee2c73f2a5059ee90bb5875e03f2
+    entity_id: 5e55fe9b0cc4558cfa11eb26477d3b4a
+    domain: switch
+  mode: single
+- id: '1747000000000'
+  alias: Kitchen fridge door open TTS
+  description: ''
+  triggers:
+  - platform: state
+    entity_id: binary_sensor.kitchen_refrigerator_door
+    to: 'on'
+    for: "00:00:45"
+  conditions: []
+  variables:
+    door_entity: binary_sensor.kitchen_refrigerator_door
+    speaker: media_player.q_series_soundbar
+  actions:
+  - repeat:
+      while:
+      - condition: template
+        value_template: "{{ is_state(door_entity, 'on') }}"
+      sequence:
+      - variables:
+          prior_volume: "{{ state_attr(speaker, 'volume_level') | default(0.5) }}"
+          tts_volume: "{{ (prior_volume | float(0.5) * 0.5) | round(2) }}"
+          open_seconds: >-
+            {{ (as_timestamp(now()) - as_timestamp(states[door_entity].last_changed
+            or now())) | int(0) }}
+      - action: media_player.volume_set
+        data:
+          entity_id: "{{ speaker }}"
+          volume_level: "{{ tts_volume }}"
+      - delay: "00:00:01"
+      - action: tts.speak
+        target:
+          entity_id: tts.piper
+        data:
+          media_player_entity_id: "{{ speaker }}"
+          message: >-
+            The Kitchen Fridge Door has been left open for
+            {{ open_seconds }} seconds
+          options:
+            voice: en_GB-jenny_dioco-medium
+      - delay: "00:00:01"
+      - action: media_player.volume_set
+        data:
+          entity_id: "{{ speaker }}"
+          volume_level: "{{ prior_volume }}"
+      - delay: "00:00:30"
+  mode: restart
+- id: '1747000000001'
+  alias: Garage fridge door open TTS
+  description: ''
+  triggers:
+  - platform: state
+    entity_id: binary_sensor.garage_refrigerator_door
+    to: 'on'
+    for: "00:00:45"
+  conditions: []
+  variables:
+    door_entity: binary_sensor.garage_refrigerator_door
+    speaker: media_player.q_series_soundbar
+  actions:
+  - repeat:
+      while:
+      - condition: template
+        value_template: "{{ is_state(door_entity, 'on') }}"
+      sequence:
+      - variables:
+          prior_volume: "{{ state_attr(speaker, 'volume_level') | default(0.5) }}"
+          tts_volume: "{{ (prior_volume | float(0.5) * 0.5) | round(2) }}"
+          open_seconds: >-
+            {{ (as_timestamp(now()) - as_timestamp(states[door_entity].last_changed
+            or now())) | int(0) }}
+      - action: media_player.volume_set
+        data:
+          entity_id: "{{ speaker }}"
+          volume_level: "{{ tts_volume }}"
+      - delay: "00:00:01"
+      - action: tts.speak
+        target:
+          entity_id: tts.piper
+        data:
+          media_player_entity_id: "{{ speaker }}"
+          message: >-
+            The Garage Fridge Door has been left open for
+            {{ open_seconds }} seconds
+          options:
+            voice: en_GB-jenny_dioco-medium
+      - delay: "00:00:01"
+      - action: media_player.volume_set
+        data:
+          entity_id: "{{ speaker }}"
+          volume_level: "{{ prior_volume }}"
+      - delay: "00:00:30"
+  mode: restart
