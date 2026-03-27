@@ -241,6 +241,8 @@ command_line:
         - battery_soc
         - plan
         - today
+        - live
         - learning
         - days_of_data
+        - detail
       scan_interval: 300

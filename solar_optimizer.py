@@ -39,6 +39,12 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DB_PATH = SCRIPT_DIR / "solar_optimizer.db"
 ENV_PATH = SCRIPT_DIR / ".env"
 
+# MetOcean API (MetService) — primary weather source for NZ
+METOCEAN_API_URL = "https://forecast-v2.metoceanapi.com/point/time"
+METOCEAN_API_KEY = "9AA6C9piwrQCsju1YppbyZ"
+METOCEAN_LAT = -43.505   # Christchurch, Parklands
+METOCEAN_LON = 172.698
+
 # Battery
 BATTERY_CAPACITY_KWH = 15.0
 BATTERY_RESERVE_PCT = 10
@@ -47,6 +53,18 @@ USABLE_CAPACITY_KWH = BATTERY_CAPACITY_KWH * (100 - BATTERY_RESERVE_PCT) / 100  
 # Peak hours (inclusive)
 PEAK_START_HOUR = 7   # 7am
 PEAK_END_HOUR = 21    # 9pm
+
+# Charge deadline — battery should reach target SOC by this time
+CHARGE_DEADLINE_HOUR = 6
+CHARGE_DEADLINE_MIN = 30
+
+# Minimum overnight SOC for power outage safety (Slot 1 floor)
+OUTAGE_RESERVE_PCT = 30
+
+# Charge power limits (watts)
+CHARGE_POWER_MIN = 3000
+CHARGE_POWER_MAX = 10000
+CHARGE_POWER_DEFAULT = 3000
 
 # TOU slot register addresses (Deye hybrid)
 TOU_REGS = {
@@ -78,7 +96,10 @@ SLOT_POWERS = [3000, 3000, 10000, 10000, 10000, 3000]  # watts (peak slots need 
 
 # Enable registers (274-279 / 0x0112-0x0117) control grid/gen charging:
 #   0 = no grid/gen charge, 1 = grid charge, 2 = gen charge, 3 = both
-# Off-peak slots (1,2,6) get grid charge, peak slots (3,4,5) get none
+# Slot 1: grid charge enabled (but SOC=reserve, so no actual charge until poll adjusts)
+# Slot 2: grid charge enabled (main charge window, poll shifts start time)
+# Slots 3-5: peak, no grid charge
+# Slot 6: no grid charge (never charge before midnight)
 SLOT_ENABLES = [1, 1, 0, 0, 0, 1]
 
 # HA entity IDs
@@ -104,6 +125,48 @@ SEASONAL_FACTOR = {
     7: 1.15, 8: 1.10, 9: 1.05, 10: 0.95, 11: 0.90, 12: 0.85,
 }
 
+# Hourly solar production weights (fraction of daily total per hour)
+# Bell curve centered ~1pm NZDT, covering 7am-9pm peak hours
+# These approximate a typical NZ solar day; sum ≈ 0.85 (peak_solar_ratio)
+HOURLY_SOLAR_WEIGHT = {
+    7: 0.02, 8: 0.05, 9: 0.08, 10: 0.10, 11: 0.12, 12: 0.13,
+    13: 0.13, 14: 0.12, 15: 0.10, 16: 0.08, 17: 0.05, 18: 0.03,
+    19: 0.01, 20: 0.00,
+}
+
+# Hourly consumption weights (fraction of daily total per peak hour)
+# Double-hump: morning (breakfast/hot water) + evening (cooking/heating/lights)
+# Sum ≈ 0.70 (matches peak_consumption_ratio default)
+HOURLY_CONSUMPTION_WEIGHT = {
+    7: 0.06, 8: 0.06, 9: 0.05, 10: 0.04, 11: 0.04, 12: 0.05,
+    13: 0.05, 14: 0.04, 15: 0.04, 16: 0.05, 17: 0.07, 18: 0.07,
+    19: 0.05, 20: 0.03,
+}
+
+# Weather condition normalization map (used in multiple places)
+CONDITION_MAP = {
+    "sunny": "sunny", "clear-night": "sunny", "clear": "sunny",
+    "partlycloudy": "partlycloudy", "partly-cloudy": "partlycloudy",
+    "cloudy": "cloudy", "fog": "cloudy",
+    "rainy": "rainy", "pouring": "rainy", "snowy": "rainy",
+    "lightning": "rainy", "lightning-rainy": "rainy",
+    "hail": "rainy", "windy": "partlycloudy",
+    "windy-variant": "partlycloudy", "exceptional": "cloudy",
+}
+
+# Temperature bands for consumption factor (°C thresholds)
+# Below band_cold -> temp_factor_cold, band_cold-band_mild -> temp_factor_cool, etc.
+TEMP_BANDS = [
+    (10, "temp_factor_cold"),     # below 10°C
+    (15, "temp_factor_cool"),     # 10-15°C
+    (20, "temp_factor_mild"),     # 15-20°C
+    (99, "temp_factor_warm"),     # above 20°C
+]
+
+# Weekend consumption factor — everyone home, heating all day if cold
+# 0=Mon, 5=Sat, 6=Sun
+WEEKEND_DAYS = {5, 6}
+
 # Default learning parameters
 DEFAULT_PARAMS = {
     "base_overnight_soc": 60.0,
@@ -119,6 +182,17 @@ DEFAULT_PARAMS = {
     "peak_consumption_ratio": 0.70,   # fraction of daily consumption during peak
     "peak_solar_ratio": 0.85,         # fraction of daily solar during peak
     "safety_margin_pct": 10.0,        # added to calculated SOC
+    # Solar model preference: 0.0 = cloud-based, 1.0 = radiation-based
+    "preferred_solar_model": 0.0,
+    # Weekend consumption factor (Sat/Sun everyone home, heating on all day)
+    "weekend_factor": 1.20,
+    # Weekday consumption factor (baseline)
+    "weekday_factor": 1.0,
+    # Temperature-based consumption factors
+    "temp_factor_cold": 1.35,         # below 10°C — heavy heating
+    "temp_factor_cool": 1.15,         # 10-15°C — moderate heating
+    "temp_factor_mild": 1.0,          # 15-20°C — baseline
+    "temp_factor_warm": 0.85,         # above 20°C — less heating
 }
 
 FAILSAFE_OVERNIGHT_SOC = 80
@@ -260,6 +334,51 @@ class HomeAssistantAPI:
             log.warning(f"Could not get weather forecast: {e}")
         return {}
 
+    def get_hourly_forecast(self, target_date=None):
+        """Get hourly weather forecast for a specific date.
+
+        Returns a list of dicts with hour, condition, cloud_coverage, precipitation
+        for peak hours (PEAK_START_HOUR to PEAK_END_HOUR).
+        """
+        try:
+            result = self._request("POST", "/api/services/weather/get_forecasts?return_response", {
+                "entity_id": SENSORS["weather"],
+                "type": "hourly",
+            })
+            sr = result.get("service_response", result)
+            entity_data = sr.get(SENSORS["weather"], sr)
+            if isinstance(entity_data, dict):
+                forecasts = entity_data.get("forecast", [])
+            elif isinstance(entity_data, list):
+                forecasts = entity_data
+            else:
+                forecasts = []
+
+            if target_date is None:
+                target_date = date.today().isoformat()
+
+            peak_hours = []
+            for fc in forecasts:
+                fc_dt = fc.get("datetime", "")
+                if not fc_dt[:10] == target_date:
+                    continue
+                try:
+                    hour = int(fc_dt[11:13])
+                except (ValueError, IndexError):
+                    continue
+                if PEAK_START_HOUR <= hour < PEAK_END_HOUR:
+                    peak_hours.append({
+                        "hour": hour,
+                        "condition": fc.get("condition", "cloudy").lower(),
+                        "cloud_coverage": fc.get("cloud_coverage", 50),
+                        "precipitation": fc.get("precipitation", 0) or 0,
+                        "temperature": fc.get("temperature"),
+                    })
+            return peak_hours
+        except Exception as e:
+            log.warning(f"Could not get hourly forecast: {e}")
+            return []
+
     def write_register(self, register, value):
         """Write a single holding register via Solarman (using write_multiple)."""
         log.info(f"Writing register {register} = {value}")
@@ -273,8 +392,140 @@ class HomeAssistantAPI:
 
 
 # ---------------------------------------------------------------------------
+# MetOcean API (MetService NZ)
+# ---------------------------------------------------------------------------
+
+def get_metocean_hourly(target_date):
+    """Fetch hourly forecast from MetOcean API for peak hours on target_date.
+
+    Returns list of dicts with hour, condition, cloud_coverage, precipitation,
+    temperature — same format as HomeAssistantAPI.get_hourly_forecast().
+    Falls back to empty list on any error.
+    """
+    try:
+        # NZ is UTC+12 (NZST) or UTC+13 (NZDT during DST)
+        # target_date 7am NZDT = previous day 18:00 UTC
+        # Start from previous day 17:00 UTC to cover all peak hours
+        prev_day = (datetime.strptime(target_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+        from_utc = f"{prev_day}T17:00:00Z"
+
+        body = json.dumps({
+            "points": [{"lat": METOCEAN_LAT, "lon": METOCEAN_LON}],
+            "variables": [
+                "air.temperature.at-2m",
+                "cloud.cover",
+                "precipitation.rate",
+                "radiation.flux.downward.shortwave",
+            ],
+            "time": {
+                "from": from_utc,
+                "interval": "1h",
+                "repeat": 36,  # 36 hours covers the full day in any TZ offset
+            },
+        }).encode()
+
+        req = urllib.request.Request(
+            METOCEAN_API_URL,
+            data=body,
+            method="POST",
+            headers={
+                "x-api-key": METOCEAN_API_KEY,
+                "Content-Type": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+
+        times = data["dimensions"]["time"]["data"]
+        temps_k = data["variables"]["air.temperature.at-2m"]["data"]
+        clouds = data["variables"]["cloud.cover"]["data"]
+        precips = data["variables"]["precipitation.rate"]["data"]
+        shortwave = data["variables"].get("radiation.flux.downward.shortwave", {}).get("data", [])
+
+        # Convert UTC times to NZ local and filter peak hours on target_date
+        # Determine NZ offset: NZDT is +13 Apr-Sep, NZST +12 rest
+        # Simplify: try +13 first (NZDT covers most of the year for DST)
+        from datetime import timezone as tz
+        nz_offset = timedelta(hours=13)  # NZDT
+
+        peak_hours = []
+        for i, t_str in enumerate(times):
+            utc_dt = datetime.fromisoformat(t_str.replace("Z", "+00:00"))
+            local_dt = utc_dt + nz_offset
+            local_date = local_dt.strftime("%Y-%m-%d")
+            local_hour = local_dt.hour
+
+            if local_date != target_date:
+                continue
+            if not (PEAK_START_HOUR <= local_hour < PEAK_END_HOUR):
+                continue
+
+            temp_c = temps_k[i] - 273.15  # Kelvin to Celsius
+            cloud_pct = clouds[i]
+            precip_mm = precips[i]
+
+            # Map cloud/precip to a condition string
+            if precip_mm > 0.5:
+                condition = "rainy"
+            elif cloud_pct >= 80:
+                condition = "cloudy"
+            elif cloud_pct >= 40:
+                condition = "partlycloudy"
+            else:
+                condition = "sunny"
+
+            # Shortwave radiation in W/m² (if available)
+            sw_wm2 = shortwave[i] if i < len(shortwave) else None
+
+            peak_hours.append({
+                "hour": local_hour,
+                "condition": condition,
+                "cloud_coverage": cloud_pct,
+                "precipitation": precip_mm,
+                "temperature": round(temp_c, 1),
+                "shortwave_wm2": round(sw_wm2, 1) if sw_wm2 is not None else None,
+            })
+
+        log.info(f"MetOcean: got {len(peak_hours)} peak hours for {target_date}")
+        return peak_hours
+
+    except Exception as e:
+        log.warning(f"MetOcean API failed, will fall back to HA forecast: {e}")
+        return []
+
+
+# ---------------------------------------------------------------------------
 # Database
 # ---------------------------------------------------------------------------
+
+BACKUP_DIR = SCRIPT_DIR / "backups"
+BACKUP_KEEP = 7  # number of daily backups to retain
+
+
+def backup_db():
+    """Create a daily SQLite backup, keeping the last BACKUP_KEEP copies."""
+    if not DB_PATH.exists():
+        return
+    BACKUP_DIR.mkdir(exist_ok=True)
+    today = date.today().isoformat()
+    backup_path = BACKUP_DIR / f"solar_optimizer_{today}.db"
+    if backup_path.exists():
+        return  # already backed up today
+
+    # Use SQLite online backup API for a safe, consistent copy
+    src = sqlite3.connect(str(DB_PATH))
+    dst = sqlite3.connect(str(backup_path))
+    src.backup(dst)
+    dst.close()
+    src.close()
+    log.info(f"Database backed up to {backup_path}")
+
+    # Prune old backups
+    backups = sorted(BACKUP_DIR.glob("solar_optimizer_*.db"))
+    for old in backups[:-BACKUP_KEEP]:
+        old.unlink()
+        log.info(f"Removed old backup: {old.name}")
+
 
 def get_db():
     db = sqlite3.connect(str(DB_PATH), timeout=5)
@@ -338,8 +589,24 @@ def init_db(db):
         );
 
         CREATE INDEX IF NOT EXISTS idx_hourly_date ON hourly_log(date);
+
+        CREATE TABLE IF NOT EXISTS forecast_tracking (
+            date              TEXT NOT NULL,
+            hour              INTEGER NOT NULL,
+            model_cloud_kwh   REAL,
+            model_rad_kwh     REAL,
+            actual_pv_wh      REAL,
+            PRIMARY KEY (date, hour)
+        );
     """)
     db.commit()
+
+    # Add temperature_high column to daily_outcome if missing (migration)
+    try:
+        db.execute("SELECT temperature_high FROM daily_outcome LIMIT 1")
+    except sqlite3.OperationalError:
+        db.execute("ALTER TABLE daily_outcome ADD COLUMN temperature_high REAL")
+        db.commit()
 
     # Seed default params if empty
     cursor = db.execute("SELECT COUNT(*) FROM learning_params")
@@ -361,6 +628,16 @@ def get_param(db, key):
     return DEFAULT_PARAMS.get(key)
 
 
+def get_temp_factor(db, temp_c):
+    """Get the consumption multiplier for a given temperature."""
+    if temp_c is None:
+        return 1.0
+    for threshold, param_key in TEMP_BANDS:
+        if temp_c < threshold:
+            return get_param(db, param_key) or 1.0
+    return get_param(db, "temp_factor_warm") or 0.85
+
+
 def set_param(db, key, value):
     now = datetime.now().isoformat()
     db.execute(
@@ -368,6 +645,117 @@ def set_param(db, key, value):
         (key, value, now),
     )
     db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Hour-by-Hour Battery Simulation
+# ---------------------------------------------------------------------------
+
+def build_hourly_solar(raw_solar, hourly_forecast, db):
+    """Build hourly solar production dict using cloud-based corrections (Model A)."""
+    result = {}
+    for hfc in hourly_forecast:
+        hour = hfc["hour"]
+        weight = HOURLY_SOLAR_WEIGHT.get(hour, 0)
+        if weight == 0:
+            continue
+        hour_solar = raw_solar * weight
+        hcond = CONDITION_MAP.get(hfc["condition"], hfc["condition"])
+        corr = get_param(db, f"{hcond}_correction") or 0.6
+        cloud_mod = 1.0 - (hfc.get("cloud_coverage", 50) / 100.0) * 0.5
+        result[hour] = hour_solar * corr * cloud_mod
+    return result
+
+
+def build_hourly_solar_radiation(raw_solar, hourly_forecast):
+    """Build hourly solar production dict using shortwave radiation (Model B).
+
+    Uses the relative shortwave radiation intensity per hour to distribute
+    the Forecast.Solar daily total across hours. This directly captures
+    atmospheric effects (clouds, aerosols, humidity) rather than inferring
+    from cloud percentage.
+
+    Returns None if shortwave data is not available.
+    """
+    # Collect shortwave values for peak hours
+    sw_by_hour = {}
+    for hfc in hourly_forecast:
+        hour = hfc["hour"]
+        sw = hfc.get("shortwave_wm2")
+        if sw is not None and hour in HOURLY_SOLAR_WEIGHT:
+            sw_by_hour[hour] = max(0, sw)  # clamp negative values
+
+    if not sw_by_hour or sum(sw_by_hour.values()) <= 0:
+        return None
+
+    # Distribute the raw_solar total proportionally to shortwave intensity
+    total_sw = sum(sw_by_hour.values())
+    result = {}
+    for hour, sw in sw_by_hour.items():
+        result[hour] = raw_solar * (sw / total_sw)
+
+    return result
+
+
+def build_hourly_consumption(daily_consumption, seasonal_factor, temp_factor, day_factor=1.0):
+    """Build hourly consumption dict from daily total and adjustment factors."""
+    return {
+        hour: daily_consumption * weight * seasonal_factor * temp_factor * day_factor
+        for hour, weight in HOURLY_CONSUMPTION_WEIGHT.items()
+    }
+
+
+def get_day_factor(db, target_date):
+    """Get weekday/weekend consumption factor for a given date."""
+    if isinstance(target_date, str):
+        target_date = datetime.strptime(target_date, "%Y-%m-%d").date()
+    if target_date.weekday() in WEEKEND_DAYS:
+        return get_param(db, "weekend_factor") or 1.20
+    return get_param(db, "weekday_factor") or 1.0
+
+
+def simulate_battery_hourly(starting_soc_pct, hourly_solar, hourly_consumption):
+    """Simulate battery SOC hour-by-hour through peak hours.
+
+    Returns dict with:
+        min_soc: lowest SOC reached (%)
+        min_soc_hour: hour when minimum occurred
+        shortfall_kwh: max energy below reserve (0 if never breached)
+        hourly_soc: list of (hour, soc_pct) tuples
+    """
+    soc_kwh = (starting_soc_pct / 100.0) * BATTERY_CAPACITY_KWH
+    reserve_kwh = (BATTERY_RESERVE_PCT / 100.0) * BATTERY_CAPACITY_KWH
+
+    min_soc_kwh = soc_kwh
+    min_soc_hour = PEAK_START_HOUR
+    max_shortfall_kwh = 0.0
+    hourly_soc = []
+
+    for hour in range(PEAK_START_HOUR, PEAK_END_HOUR):
+        solar = hourly_solar.get(hour, 0.0)
+        consumption = hourly_consumption.get(hour, 0.0)
+
+        soc_kwh += solar - consumption
+        soc_kwh = max(0.0, min(BATTERY_CAPACITY_KWH, soc_kwh))
+
+        soc_pct = (soc_kwh / BATTERY_CAPACITY_KWH) * 100.0
+        hourly_soc.append((hour, round(soc_pct, 1)))
+
+        if soc_kwh < min_soc_kwh:
+            min_soc_kwh = soc_kwh
+            min_soc_hour = hour
+
+        if soc_kwh < reserve_kwh:
+            shortfall = reserve_kwh - soc_kwh
+            if shortfall > max_shortfall_kwh:
+                max_shortfall_kwh = shortfall
+
+    return {
+        "min_soc": round((min_soc_kwh / BATTERY_CAPACITY_KWH) * 100.0, 1),
+        "min_soc_hour": min_soc_hour,
+        "shortfall_kwh": round(max_shortfall_kwh, 2),
+        "hourly_soc": hourly_soc,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -411,85 +799,136 @@ def calculate_plan(ha, db):
         precipitation = 0
         temp_high = weather.get("temperature")
 
-    # Step 3: Apply weather correction
-    # Normalize weather condition to our correction keys
-    CONDITION_MAP = {
-        "sunny": "sunny",
-        "clear-night": "sunny",
-        "clear": "sunny",
-        "partlycloudy": "partlycloudy",
-        "partly-cloudy": "partlycloudy",
-        "cloudy": "cloudy",
-        "fog": "cloudy",
-        "rainy": "rainy",
-        "pouring": "rainy",
-        "snowy": "rainy",
-        "lightning": "rainy",
-        "lightning-rainy": "rainy",
-        "hail": "rainy",
-        "windy": "partlycloudy",
-        "windy-variant": "partlycloudy",
-        "exceptional": "cloudy",
-    }
-    normalized = CONDITION_MAP.get(condition, None)
-    if normalized:
-        correction_key = f"{normalized}_correction"
-    else:
-        correction_key = f"{condition}_correction"
+    # Step 3: Get hourly forecast — MetOcean primary, HA fallback
+    tomorrow_str = (date.today() + timedelta(days=1)).isoformat()
+    hourly = get_metocean_hourly(tomorrow_str)
+    if not hourly:
+        hourly = ha.get_hourly_forecast(tomorrow_str)
 
-    base_correction = get_param(db, correction_key)
-    if base_correction is None:
-        log.warning(f"Unknown weather condition '{condition}', using 0.6 correction")
-        base_correction = 0.6
-
-    cloud_modifier = 1.0 - (cloud_pct / 100.0) * 0.5
-    correction_factor = base_correction * cloud_modifier
-    adjusted_solar = raw_solar * correction_factor
-
-    log.info(f"Solar forecast: {raw_solar:.1f} kWh, condition: {condition}, "
-             f"cloud: {cloud_pct}%, correction: {correction_factor:.2f}, "
-             f"adjusted: {adjusted_solar:.1f} kWh")
-
-    # Step 4: Estimate peak-hours energy balance
+    # Step 4: Build hourly solar and consumption profiles
     daily_consumption = get_param(db, "daily_consumption_avg")
     seasonal = SEASONAL_FACTOR.get(date.today().month, 1.0)
-    peak_ratio = get_param(db, "peak_consumption_ratio")
-    solar_ratio = get_param(db, "peak_solar_ratio")
 
-    peak_consumption = daily_consumption * peak_ratio * seasonal
-    peak_solar = adjusted_solar * solar_ratio
+    if hourly and len(hourly) >= 6:
+        # Model A: cloud-based corrections
+        solar_cloud = build_hourly_solar(raw_solar, hourly, db)
+        # Model B: shortwave radiation-based
+        solar_rad = build_hourly_solar_radiation(raw_solar, hourly)
+
+        # Pick active model based on learned accuracy
+        preferred = get_param(db, "preferred_solar_model")  # 0=cloud, 1=radiation
+        if solar_rad and preferred and preferred >= 0.5:
+            hourly_solar_map = solar_rad
+            active_model = "radiation"
+        else:
+            hourly_solar_map = solar_cloud
+            active_model = "cloud"
+
+        peak_solar = sum(hourly_solar_map.values())
+        adjusted_solar = peak_solar
+        correction_factor = adjusted_solar / raw_solar if raw_solar > 0 else 0
+
+        # Use average temperature from hourly forecast
+        temps = [h["temperature"] for h in hourly if h.get("temperature") is not None]
+        if temps:
+            temp_high = sum(temps) / len(temps)
+
+        cloud_total = sum(solar_cloud.values())
+        rad_total = sum(solar_rad.values()) if solar_rad else 0
+        hours_detail = [f"{h}:{hourly_solar_map.get(h, 0):.1f}" for h in sorted(hourly_solar_map)]
+        log.info(f"Solar forecast: {raw_solar:.1f} kWh, active={active_model}, "
+                 f"cloud={cloud_total:.1f} kWh, radiation={rad_total:.1f} kWh "
+                 f"[{', '.join(hours_detail)}]")
+    else:
+        # Fallback — single daily condition, spread using weights
+        normalized = CONDITION_MAP.get(condition, None)
+        correction_key = f"{normalized}_correction" if normalized else f"{condition}_correction"
+        base_correction = get_param(db, correction_key)
+        if base_correction is None:
+            base_correction = 0.6
+        cloud_modifier = 1.0 - (cloud_pct / 100.0) * 0.5
+        correction_factor = base_correction * cloud_modifier
+        adjusted_solar = raw_solar * correction_factor
+        peak_solar = adjusted_solar * get_param(db, "peak_solar_ratio")
+
+        # Build hourly solar from daily total spread by weight
+        total_weight = sum(HOURLY_SOLAR_WEIGHT.values())
+        hourly_solar_map = {
+            h: peak_solar * (w / total_weight)
+            for h, w in HOURLY_SOLAR_WEIGHT.items() if w > 0
+        }
+        log.info(f"Solar forecast: {raw_solar:.1f} kWh, adjusted: {adjusted_solar:.1f} kWh "
+                 f"(daily fallback, correction: {correction_factor:.2f})")
+
+    temp_factor = get_temp_factor(db, temp_high)
+    tomorrow_str = (date.today() + timedelta(days=1)).isoformat()
+    day_factor = get_day_factor(db, tomorrow_str)
+    hourly_consumption_map = build_hourly_consumption(daily_consumption, seasonal, temp_factor, day_factor)
+    peak_consumption = sum(hourly_consumption_map.values())
     energy_deficit = max(0, peak_consumption - peak_solar)
 
-    log.info(f"Peak consumption: {peak_consumption:.1f} kWh, "
+    log.info(f"Peak consumption: {peak_consumption:.1f} kWh "
+             f"(seasonal={seasonal:.2f}, temp_factor={temp_factor:.2f}, "
+             f"day_factor={day_factor:.2f}), "
              f"peak solar: {peak_solar:.1f} kWh, "
              f"deficit: {energy_deficit:.1f} kWh")
 
-    # Step 5: Convert deficit to SOC target
-    soc_from_deficit = (energy_deficit / USABLE_CAPACITY_KWH) * 100
+    # Step 5: Binary search for minimum starting SOC where battery stays above reserve
     safety_margin = get_param(db, "safety_margin_pct")
-    raw_soc_target = soc_from_deficit + safety_margin
+    reserve_target = BATTERY_RESERVE_PCT + safety_margin  # e.g. 10% + 10% = 20% floor
 
-    base_soc = get_param(db, "base_overnight_soc")
-    overnight_soc = max(raw_soc_target, base_soc)
+    # Binary search: find lowest SOC where sim min never drops below reserve_target
+    lo, hi = BATTERY_RESERVE_PCT, 100
+    best_soc = hi  # worst case
+    best_sim = None
+
+    for _ in range(15):  # converges in ~7 iterations for 0-100 range
+        mid = (lo + hi) / 2.0
+        sim = simulate_battery_hourly(mid, hourly_solar_map, hourly_consumption_map)
+        if sim["min_soc"] >= reserve_target:
+            best_soc = mid
+            best_sim = sim
+            hi = mid
+        else:
+            lo = mid
+        if hi - lo < 1:
+            break
+
+    # Round up to nearest 5 for safety
+    candidate_soc = int(((best_soc + 4) // 5) * 5)
+
+    # Final simulation at the rounded value
+    sim = simulate_battery_hourly(candidate_soc, hourly_solar_map, hourly_consumption_map)
+
+    soc_from_deficit = (energy_deficit / USABLE_CAPACITY_KWH) * 100 + safety_margin
+
+    log.info(f"Simulation: min_soc={sim['min_soc']}% at {sim['min_soc_hour']}:00, "
+             f"optimal start={best_soc:.0f}%, rounded={candidate_soc}%, "
+             f"deficit-based={soc_from_deficit:.0f}%, "
+             f"profile={sim['hourly_soc']}")
 
     min_soc = get_param(db, "min_overnight_soc")
     max_soc = get_param(db, "max_overnight_soc")
-    overnight_soc = max(min_soc, min(max_soc, overnight_soc))
+    overnight_soc = max(min_soc, min(max_soc, candidate_soc))
 
     # Round to nearest 5
     overnight_soc = int(round(overnight_soc / 5) * 5)
 
-    log.info(f"SOC target: deficit-based={raw_soc_target:.0f}%, "
-             f"learned-base={base_soc:.0f}%, final={overnight_soc}%")
+    log.info(f"SOC target: sim-optimal={candidate_soc}%, "
+             f"deficit-based={soc_from_deficit:.0f}%, "
+             f"final={overnight_soc}%")
 
     # Build slot SOC values
+    # Slot 1 (00:00-04:00) and Slot 6 (21:00-00:00) stay at reserve — no early charging.
+    # The hourly poll will dynamically shift Slot 2 start time and power
+    # so the battery reaches target SOC by 06:30, minimizing time at 100%.
     slot_socs = [
-        overnight_soc,        # slot 1: 00:00-04:00 overnight charge
-        overnight_soc,        # slot 2: 04:00-07:00 early morning charge
+        OUTAGE_RESERVE_PCT,   # slot 1: 00:00-04:00 charge to 30% for outage safety
+        overnight_soc,        # slot 2: 04:00-07:00 charge window (poll shifts start)
         BATTERY_RESERVE_PCT,  # slot 3: 07:00-11:00 peak morning
         BATTERY_RESERVE_PCT,  # slot 4: 11:00-15:00 solar peak
         BATTERY_RESERVE_PCT,  # slot 5: 15:00-21:00 afternoon peak
-        overnight_soc,        # slot 6: 21:00-00:00 evening off-peak charge
+        OUTAGE_RESERVE_PCT,   # slot 6: 21:00-00:00 outage safety (same as slot 1)
     ]
 
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
@@ -523,7 +962,7 @@ def make_failsafe_plan(reason):
         "overnight_soc_target": FAILSAFE_OVERNIGHT_SOC,
         "energy_deficit_kwh": 0,
         "correction_factor": 1.0,
-        "slot_socs": [FAILSAFE_OVERNIGHT_SOC, FAILSAFE_OVERNIGHT_SOC,
+        "slot_socs": [OUTAGE_RESERVE_PCT, FAILSAFE_OVERNIGHT_SOC,
                       BATTERY_RESERVE_PCT, BATTERY_RESERVE_PCT,
                       BATTERY_RESERVE_PCT, BATTERY_RESERVE_PCT],
     }
@@ -594,13 +1033,45 @@ def write_dashboard_status(ha, db, plan=None):
         "battery_soc": ha.get_sensor_float(SENSORS["battery_soc"]),
     }
 
-    # Tomorrow's plan
+    # Show today's plan during the day, tomorrow's plan after 9pm optimize
     p = plan
     if not p:
-        row = db.execute("SELECT * FROM daily_plan WHERE date=?", (tomorrow,)).fetchone()
+        now_hour = datetime.now().hour
+        if now_hour >= 21:
+            # After optimize — show tomorrow's plan
+            row = db.execute("SELECT * FROM daily_plan WHERE date=?", (tomorrow,)).fetchone()
+            if not row:
+                row = db.execute("SELECT * FROM daily_plan WHERE date=?", (today,)).fetchone()
+        else:
+            # During the day — show today's plan
+            row = db.execute("SELECT * FROM daily_plan WHERE date=?", (today,)).fetchone()
+            if not row:
+                row = db.execute("SELECT * FROM daily_plan WHERE date=?", (tomorrow,)).fetchone()
         if row:
             p = dict(row)
     if p:
+        # Read actual TOU slot config from inverter sensors
+        slots = []
+        for i in range(6):
+            n = i + 1
+            slot_time = ha.get_state(f"sensor.inverter_time_of_use_time_{n}").get("state", "??:??")
+            slot_soc = ha.get_sensor_float(f"sensor.inverter_time_of_use_soc_{n}")
+            slot_power = ha.get_sensor_float(f"sensor.inverter_time_of_use_power_{n}")
+            slot_enable = ha.get_sensor_float(f"sensor.inverter_time_of_use_enable_{n}")
+            # Next slot time for "to" column
+            if i < 5:
+                next_time = ha.get_state(f"sensor.inverter_time_of_use_time_{n+1}").get("state", "??:??")
+            else:
+                next_time = "00:00"
+            slots.append({
+                "slot": n,
+                "from": slot_time,
+                "to": next_time,
+                "soc": int(slot_soc) if slot_soc is not None else "?",
+                "power": int(slot_power) if slot_power is not None else "?",
+                "grid": "Yes" if slot_enable and int(slot_enable) & 1 else "No",
+            })
+
         status["plan"] = {
             "date": p.get("date", tomorrow),
             "solar_forecast": p.get("solar_forecast_kwh"),
@@ -610,6 +1081,8 @@ def write_dashboard_status(ha, db, plan=None):
             "overnight_soc": p.get("overnight_soc_target"),
             "deficit": p.get("energy_deficit_kwh"),
             "correction": p.get("correction_factor"),
+            "temp_factor": get_temp_factor(db, p.get("temperature_high")),
+            "slots": slots,
         }
 
     # Today's outcome (if recorded)
@@ -624,6 +1097,24 @@ def write_dashboard_status(ha, db, plan=None):
             "peak_grid_kwh": outcome["peak_grid_kwh"],
             "forecast_accuracy": outcome["forecast_accuracy"],
         }
+    # Live actuals for the dashboard (always include when no outcome yet)
+    if not outcome:
+        live = {}
+        solar_today = ha.get_sensor_float(SENSORS["daily_production"])
+        if solar_today is not None:
+            live["solar"] = round(solar_today, 1)
+        peak_start = get_param(db, "peak_start_grid_bought")
+        current_bought = ha.get_sensor_float(SENSORS["daily_grid_bought"])
+        if peak_start is not None and current_bought is not None:
+            live["peak_grid_kwh"] = round(max(0, current_bought - peak_start), 1)
+        else:
+            live["peak_grid_kwh"] = 0.0
+        batt = ha.get_sensor_float(SENSORS["battery_soc"])
+        if batt is not None:
+            live["battery_soc"] = round(batt, 0)
+        weather = ha.get_weather()
+        live["weather"] = weather.get("condition", "unknown").lower()
+        status["live"] = live
 
     # Learning params summary
     status["learning"] = {
@@ -633,11 +1124,120 @@ def write_dashboard_status(ha, db, plan=None):
         "cloudy_corr": get_param(db, "cloudy_correction"),
         "partly_corr": get_param(db, "partlycloudy_correction"),
         "rainy_corr": get_param(db, "rainy_correction"),
+        "temp_cold": get_param(db, "temp_factor_cold"),
+        "temp_cool": get_param(db, "temp_factor_cool"),
+        "temp_mild": get_param(db, "temp_factor_mild"),
+        "temp_warm": get_param(db, "temp_factor_warm"),
     }
 
     # Days of data
     days = db.execute("SELECT COUNT(*) FROM daily_outcome").fetchone()[0]
     status["days_of_data"] = days
+
+    # Model preference
+    pref = get_param(db, "preferred_solar_model") or 0.0
+    status["learning"]["model_pref"] = round(pref, 2)
+    status["learning"]["active_model"] = "radiation" if pref >= 0.5 else "cloud"
+
+    # Detailed hourly forecast for the detail view
+    try:
+        plan_date = p.get("date", today) if p else today
+        raw_solar = ha.get_sensor_float(
+            SENSORS["solar_forecast_today"] if plan_date == today
+            else SENSORS["solar_forecast_tomorrow"]
+        )
+
+        hourly = get_metocean_hourly(plan_date)
+        hourly_source = "metocean"
+        if not hourly:
+            hourly = ha.get_hourly_forecast(plan_date)
+            hourly_source = "ha"
+
+        if hourly and len(hourly) >= 6 and raw_solar and raw_solar > 0:
+            solar_cloud = build_hourly_solar(raw_solar, hourly, db)
+            solar_rad = build_hourly_solar_radiation(raw_solar, hourly)
+
+            daily_consumption = get_param(db, "daily_consumption_avg")
+            seasonal = SEASONAL_FACTOR.get(datetime.now().month, 1.0)
+            temps = [h["temperature"] for h in hourly if h.get("temperature") is not None]
+            avg_temp = sum(temps) / len(temps) if temps else None
+            temp_factor = get_temp_factor(db, avg_temp)
+            day_factor = get_day_factor(db, plan_date)
+            hourly_consumption_map = build_hourly_consumption(daily_consumption, seasonal, temp_factor, day_factor)
+
+            # Use active model for simulation
+            active_solar = solar_rad if (solar_rad and pref >= 0.5) else solar_cloud
+            soc_target = p.get("overnight_soc_target", 70) if p else 70
+            sim = simulate_battery_hourly(soc_target, active_solar, hourly_consumption_map)
+
+            # Get actual hourly battery SOC from poll logs
+            actual_soc_rows = db.execute(
+                "SELECT hour, battery_soc FROM hourly_log WHERE date=? ORDER BY hour",
+                (plan_date,)
+            ).fetchall()
+            actual_soc_by_hour = {r["hour"]: r["battery_soc"] for r in actual_soc_rows}
+
+            # Build hourly detail rows
+            sim_soc_map = dict(sim["hourly_soc"])
+            detail_hours = []
+            for hfc in hourly:
+                h = hfc["hour"]
+                forecast_soc = sim_soc_map.get(h)
+                actual_soc = actual_soc_by_hour.get(h)
+                diff = None
+                if forecast_soc is not None and actual_soc is not None:
+                    diff = round(actual_soc - forecast_soc, 1)
+                detail_hours.append({
+                    "hour": h,
+                    "condition": hfc["condition"],
+                    "cloud": round(hfc.get("cloud_coverage", 0)),
+                    "temp": hfc.get("temperature"),
+                    "sw_wm2": hfc.get("shortwave_wm2"),
+                    "solar_cloud": round(solar_cloud.get(h, 0), 2),
+                    "solar_rad": round((solar_rad or {}).get(h, 0), 2),
+                    "consumption": round(hourly_consumption_map.get(h, 0), 2),
+                    "battery_soc": forecast_soc,
+                    "actual_soc": actual_soc,
+                    "soc_diff": diff,
+                })
+
+            status["detail"] = {
+                "source": hourly_source,
+                "raw_solar": raw_solar,
+                "plan_date": plan_date,
+                "seasonal": seasonal,
+                "temp_factor": round(temp_factor, 2),
+                "day_factor": round(day_factor, 2),
+                "avg_temp": round(avg_temp, 1) if avg_temp else None,
+                "cloud_total": round(sum(solar_cloud.values()), 1),
+                "rad_total": round(sum(solar_rad.values()), 1) if solar_rad else None,
+                "consumption_total": round(sum(hourly_consumption_map.values()), 1),
+                "sim_min_soc": sim["min_soc"],
+                "sim_min_hour": sim["min_soc_hour"],
+                "hours": detail_hours,
+            }
+
+            # Recent model tracking accuracy
+            tracking = db.execute("""
+                SELECT date,
+                       SUM(ABS(model_cloud_kwh * 1000 - actual_pv_wh)) as cloud_err,
+                       SUM(ABS(model_rad_kwh * 1000 - actual_pv_wh)) as rad_err,
+                       COUNT(*) as n
+                FROM forecast_tracking
+                WHERE actual_pv_wh IS NOT NULL
+                  AND model_cloud_kwh IS NOT NULL
+                GROUP BY date ORDER BY date DESC LIMIT 7
+            """).fetchall()
+            if tracking:
+                status["detail"]["model_accuracy"] = [
+                    {"date": r["date"],
+                     "cloud_err": round(r["cloud_err"]),
+                     "rad_err": round(r["rad_err"]) if r["rad_err"] else None,
+                     "hours": r["n"]}
+                    for r in tracking
+                ]
+    except Exception as e:
+        log.warning(f"Could not generate detail data: {e}")
 
     status_path = SCRIPT_DIR / "solar_optimizer_status.json"
     status_path.write_text(json.dumps(status, indent=2))
@@ -682,14 +1282,15 @@ def record_outcome(ha, db):
     batt_discharge = ha.get_sensor_float(SENSORS["daily_battery_discharge"])
     batt_soc = ha.get_sensor_float(SENSORS["battery_soc"])
 
-    # Estimate peak grid usage from hourly logs
-    peak_grid_kwh = estimate_peak_grid(db, today)
-
-    # Fallback heuristic if no hourly data
-    if peak_grid_kwh is None and grid_bought is not None:
-        # Estimate: overnight off-peak grid ~ baseload * 10hrs * 0.5kW = 5kWh
-        expected_offpeak = 5.0
-        peak_grid_kwh = max(0, (grid_bought or 0) - expected_offpeak)
+    # Calculate peak grid usage from differential metering
+    # peak_start_grid_bought is recorded by the poll at PEAK_START_HOUR
+    peak_start = get_param(db, "peak_start_grid_bought")
+    if peak_start is not None and grid_bought is not None:
+        peak_grid_kwh = max(0, grid_bought - peak_start)
+        log.info(f"Peak grid (metered): {grid_bought:.2f} - {peak_start:.2f} = {peak_grid_kwh:.2f} kWh")
+    else:
+        peak_grid_kwh = 0
+        log.warning("No peak-start grid_bought snapshot, peak grid usage unknown")
 
     peak_grid_used = 1 if (peak_grid_kwh or 0) > 0.5 else 0
 
@@ -700,20 +1301,21 @@ def record_outcome(ha, db):
         forecast_accuracy = production / plan["solar_forecast_kwh"]
 
     weather = ha.get_weather()
+    temp_high = weather.get("temperature")
 
     db.execute("""
         INSERT OR REPLACE INTO daily_outcome
         (date, recorded_at, actual_production_kwh, actual_consumption_kwh,
          grid_bought_kwh, grid_sold_kwh, battery_charge_kwh, battery_discharge_kwh,
          battery_soc_at_record, peak_grid_used, peak_grid_kwh,
-         forecast_accuracy, weather_condition)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         forecast_accuracy, weather_condition, temperature_high)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         today, datetime.now().isoformat(),
         production, consumption, grid_bought, grid_sold,
         batt_charge, batt_discharge, batt_soc,
         peak_grid_used, peak_grid_kwh,
-        forecast_accuracy, weather["condition"],
+        forecast_accuracy, weather["condition"], temp_high,
     ))
     db.commit()
 
@@ -725,34 +1327,18 @@ def record_outcome(ha, db):
     update_learning(db)
 
 
-def estimate_peak_grid(db, day):
-    """Estimate grid usage during peak hours from hourly logs."""
-    rows = db.execute("""
-        SELECT hour, grid_power_w FROM hourly_log
-        WHERE date=? AND hour >= ? AND hour < ?
-        ORDER BY hour
-    """, (day, PEAK_START_HOUR, PEAK_END_HOUR)).fetchall()
-
-    if not rows or len(rows) < 4:
-        return None  # Not enough hourly data
-
-    # Sum positive grid power (importing) across peak hours
-    # Each sample represents ~1 hour, so W ≈ Wh for that hour
-    total_wh = 0
-    for row in rows:
-        power = row["grid_power_w"]
-        if power is not None and power > 0:
-            total_wh += power
-
-    return total_wh / 1000  # Convert to kWh
-
 
 # ---------------------------------------------------------------------------
 # Hourly Polling
 # ---------------------------------------------------------------------------
 
 def poll_snapshot(ha, db):
-    """Record an hourly snapshot of key metrics."""
+    """Record an hourly snapshot and dynamically adjust overnight charging.
+
+    During the overnight window (00:00–06:30), this calculates the latest
+    possible charge start time and appropriate power level so the battery
+    reaches its target SOC by 06:30, minimizing time spent at 100%.
+    """
     now = datetime.now()
     ts = now.isoformat()
     day = now.date().isoformat()
@@ -776,6 +1362,382 @@ def poll_snapshot(ha, db):
 
     log.info(f"Poll: SOC={battery_soc}%, grid={grid_power}W, "
              f"PV={pv_power}W, load={load_power}W")
+
+    # --- Snapshot grid_bought at peak start for accurate peak metering ---
+    if hour == PEAK_START_HOUR:
+        peak_start_bought = ha.get_sensor_float(SENSORS["daily_grid_bought"])
+        if peak_start_bought is not None:
+            set_param(db, "peak_start_grid_bought", peak_start_bought)
+            log.info(f"Recorded peak-start grid_bought: {peak_start_bought:.2f} kWh")
+
+    # --- Track dual solar forecast models during peak hours ---
+    if PEAK_START_HOUR <= hour < PEAK_END_HOUR:
+        track_solar_models(ha, db, day, hour, pv_power)
+
+    # --- Dynamic overnight charge adjustment ---
+    adjust_overnight_charging(ha, db, now, battery_soc)
+
+
+def track_solar_models(ha, db, day, hour, actual_pv_w):
+    """Track both solar forecast models against actual PV production.
+
+    Records each model's hourly prediction alongside actual PV watts.
+    The actual PV is a point-in-time sample (W), treated as ~Wh for the hour.
+    """
+    try:
+        raw_solar = ha.get_sensor_float(SENSORS["solar_forecast_today"])
+        if raw_solar is None or raw_solar <= 0:
+            return
+
+        hourly = get_metocean_hourly(day)
+        if not hourly:
+            hourly = ha.get_hourly_forecast(day)
+        if not hourly:
+            return
+
+        # Get this hour's forecast from both models
+        solar_cloud = build_hourly_solar(raw_solar, hourly, db)
+        solar_rad = build_hourly_solar_radiation(raw_solar, hourly)
+
+        cloud_kwh = solar_cloud.get(hour, 0)
+        rad_kwh = (solar_rad or {}).get(hour, 0)
+        actual_wh = actual_pv_w  # W ≈ Wh for 1-hour sample
+
+        db.execute("""
+            INSERT OR REPLACE INTO forecast_tracking
+            (date, hour, model_cloud_kwh, model_rad_kwh, actual_pv_wh)
+            VALUES (?, ?, ?, ?, ?)
+        """, (day, hour, round(cloud_kwh, 3), round(rad_kwh, 3), actual_wh))
+        db.commit()
+
+        log.info(f"Model tracking h{hour}: cloud={cloud_kwh:.2f}kWh, "
+                 f"rad={rad_kwh:.2f}kWh, actual={actual_wh:.0f}Wh")
+
+    except Exception as e:
+        log.warning(f"Model tracking failed: {e}")
+
+
+def update_model_preference(db):
+    """Compare both solar models' accuracy over recent days and update preference.
+
+    Called from update_learning(). Compares cumulative daily error
+    (sum of |predicted - actual| across peak hours) for each model.
+    Moves preference toward the more accurate model.
+    """
+    # Get last 7 days of tracking data
+    rows = db.execute("""
+        SELECT date,
+               SUM(ABS(model_cloud_kwh * 1000 - actual_pv_wh)) as cloud_error,
+               SUM(ABS(model_rad_kwh * 1000 - actual_pv_wh)) as rad_error,
+               COUNT(*) as hours
+        FROM forecast_tracking
+        WHERE actual_pv_wh IS NOT NULL
+          AND model_cloud_kwh IS NOT NULL
+          AND model_rad_kwh IS NOT NULL
+        GROUP BY date
+        ORDER BY date DESC
+        LIMIT 7
+    """).fetchall()
+
+    if len(rows) < 2:
+        log.info("Not enough model tracking data yet (need 2+ days)")
+        return
+
+    total_cloud_err = sum(r["cloud_error"] for r in rows)
+    total_rad_err = sum(r["rad_error"] for r in rows)
+    total_hours = sum(r["hours"] for r in rows)
+
+    if total_cloud_err + total_rad_err == 0:
+        return
+
+    # Lower error = better; calculate preference toward radiation (0-1)
+    # If rad_err < cloud_err, preference moves toward 1.0
+    if total_rad_err < total_cloud_err:
+        target_pref = 1.0
+    else:
+        target_pref = 0.0
+
+    current_pref = get_param(db, "preferred_solar_model") or 0.0
+    # Move 30% toward target
+    new_pref = current_pref + 0.30 * (target_pref - current_pref)
+    new_pref = round(max(0.0, min(1.0, new_pref)), 3)
+
+    avg_cloud = total_cloud_err / total_hours if total_hours > 0 else 0
+    avg_rad = total_rad_err / total_hours if total_hours > 0 else 0
+
+    if abs(new_pref - current_pref) > 0.01:
+        log.info(f"Model preference: cloud_err={avg_cloud:.0f}Wh/hr, "
+                 f"rad_err={avg_rad:.0f}Wh/hr, "
+                 f"pref {current_pref:.2f} -> {new_pref:.2f} "
+                 f"(active={'radiation' if new_pref >= 0.5 else 'cloud'}, "
+                 f"n={total_hours}h over {len(rows)} days)")
+        set_param(db, "preferred_solar_model", new_pref)
+    else:
+        active = "radiation" if new_pref >= 0.5 else "cloud"
+        log.info(f"Model preference unchanged at {new_pref:.2f} ({active}), "
+                 f"cloud_err={avg_cloud:.0f}, rad_err={avg_rad:.0f}")
+
+
+def adjust_overnight_charging(ha, db, now, current_soc):
+    """Dynamically adjust charge start time and power to hit target by 06:30.
+
+    Called every hour by the poll cron. Only acts during 00:00–06:30.
+    Writes Slot 1/2 time, SOC, and power registers to delay charging as
+    late as possible while still reaching the target SOC by the deadline.
+    """
+    deadline_hour = CHARGE_DEADLINE_HOUR
+    deadline_min = CHARGE_DEADLINE_MIN
+    deadline_minutes = deadline_hour * 60 + deadline_min  # 390 min from midnight
+
+    now_minutes = now.hour * 60 + now.minute
+
+    # Only adjust during the overnight window (midnight to deadline)
+    if now_minutes >= deadline_minutes or now.hour >= PEAK_START_HOUR:
+        return
+
+    if current_soc is None:
+        log.warning("Cannot adjust charging: battery SOC unavailable")
+        return
+
+    # Get today's plan (optimize runs at 22:00 for tomorrow, so today's
+    # date in the plan matches what was written last night)
+    today = now.date().isoformat()
+    plan_row = db.execute(
+        "SELECT overnight_soc_target FROM daily_plan WHERE date=?", (today,)
+    ).fetchone()
+
+    if not plan_row:
+        log.info("No plan found for today, skipping charge adjustment")
+        return
+
+    target_soc = plan_row["overnight_soc_target"]
+
+    # Already at or above target — ensure slots are set to not charge
+    if current_soc >= target_soc:
+        log.info(f"SOC {current_soc}% >= target {target_soc}%, "
+                 f"no charging needed")
+        _write_charge_slots(ha, reserve_only=True)
+        return
+
+    # Calculate energy needed (kWh)
+    soc_needed = target_soc - current_soc
+    energy_kwh = (soc_needed / 100.0) * USABLE_CAPACITY_KWH
+
+    # Time remaining until deadline (hours)
+    minutes_left = deadline_minutes - now_minutes
+    hours_left = minutes_left / 60.0
+
+    # Calculate charge time at default power (3kW), then determine
+    # the latest start time
+    charge_hours_at_default = energy_kwh / (CHARGE_POWER_DEFAULT / 1000.0)
+
+    # Check if we can even make it at max power
+    charge_hours_at_max = energy_kwh / (CHARGE_POWER_MAX / 1000.0)
+
+    if charge_hours_at_max > hours_left:
+        # Can't make it even at max power — start NOW at max
+        log.warning(f"Tight deadline! Need {energy_kwh:.1f}kWh in {hours_left:.1f}h, "
+                    f"even {CHARGE_POWER_MAX}W needs {charge_hours_at_max:.1f}h. "
+                    f"Starting immediately at max power.")
+        charge_power = CHARGE_POWER_MAX
+        start_hour = now.hour
+        start_min = 0
+    elif charge_hours_at_default <= hours_left:
+        # Plenty of time at default power — delay start
+        charge_power = CHARGE_POWER_DEFAULT
+        # Add 15 min buffer for ramp-up and register write delays
+        buffer_minutes = 15
+        start_minutes = deadline_minutes - int(charge_hours_at_default * 60) - buffer_minutes
+        # Don't start before now
+        start_minutes = max(start_minutes, now_minutes)
+        start_hour = start_minutes // 60
+        start_min = start_minutes % 60
+    else:
+        # Not enough time at default but OK at higher power — calculate
+        # the minimum power needed, then add margin
+        min_power_kw = energy_kwh / hours_left
+        # Add 20% margin and round up to nearest 500W
+        charge_power_w = min_power_kw * 1000 * 1.2
+        charge_power = min(CHARGE_POWER_MAX,
+                           int((charge_power_w + 499) // 500) * 500)
+        # Recalculate charge time at this power
+        charge_hours = energy_kwh / (charge_power / 1000.0)
+        buffer_minutes = 15
+        start_minutes = deadline_minutes - int(charge_hours * 60) - buffer_minutes
+        start_minutes = max(start_minutes, now_minutes)
+        start_hour = start_minutes // 60
+        start_min = start_minutes % 60
+
+    # Round start_min to nearest 15 (Deye register precision is 1 min,
+    # but cleaner for logging; round DOWN to start slightly earlier)
+    start_min = (start_min // 15) * 15
+
+    # Refresh weather forecast and re-evaluate target if conditions changed
+    original_target = target_soc
+    target_soc = _maybe_revise_target(ha, db, today, target_soc, current_soc)
+
+    # Update the DB plan if target was revised so dashboard reflects it
+    if target_soc != original_target:
+        db.execute(
+            "UPDATE daily_plan SET overnight_soc_target=?, slot1_soc=?, slot2_soc=? WHERE date=?",
+            (target_soc, OUTAGE_RESERVE_PCT, target_soc, today))
+        db.commit()
+
+    # Recalculate if target changed
+    soc_needed_revised = target_soc - current_soc
+    if soc_needed_revised <= 0:
+        log.info(f"Revised target {target_soc}% already met at SOC {current_soc}%")
+        _write_charge_slots(ha, reserve_only=True)
+        return
+    if soc_needed_revised != soc_needed:
+        # Recalculate with revised target
+        energy_kwh = (soc_needed_revised / 100.0) * USABLE_CAPACITY_KWH
+        charge_hours = energy_kwh / (charge_power / 1000.0)
+        buffer_minutes = 15
+        start_minutes = deadline_minutes - int(charge_hours * 60) - buffer_minutes
+        start_minutes = max(start_minutes, now_minutes)
+        start_hour = start_minutes // 60
+        start_min = (start_minutes % 60 // 15) * 15
+
+    log.info(f"Charge adjustment: SOC={current_soc}% -> {target_soc}%, "
+             f"need {energy_kwh:.1f}kWh, power={charge_power}W, "
+             f"start={start_hour:02d}:{start_min:02d}, "
+             f"deadline={deadline_hour:02d}:{deadline_min:02d}")
+
+    _write_charge_slots(ha, reserve_only=False, target_soc=target_soc,
+                        start_hour=start_hour, start_min=start_min,
+                        charge_power=charge_power)
+
+
+def _maybe_revise_target(ha, db, today, current_target, current_soc):
+    """Revise SOC target using hourly battery simulation.
+
+    Uses MetOcean (or HA fallback) hourly forecast to simulate the battery
+    hour-by-hour through peak hours. If the simulation shows the battery
+    hitting reserve, the target is raised. Only lowers the target if the
+    simulation shows significant headroom.
+
+    Returns the (possibly revised) target SOC.
+    """
+    try:
+        raw_solar = ha.get_sensor_float(SENSORS["solar_forecast_today"])
+        if raw_solar is None or raw_solar <= 0:
+            return current_target
+
+        hourly = get_metocean_hourly(today)
+        if not hourly:
+            hourly = ha.get_hourly_forecast(today)
+        if not hourly:
+            log.info("No hourly forecast available, keeping target")
+            return current_target
+
+        solar_cloud = build_hourly_solar(raw_solar, hourly, db)
+        solar_rad = build_hourly_solar_radiation(raw_solar, hourly)
+
+        preferred = get_param(db, "preferred_solar_model")
+        if solar_rad and preferred and preferred >= 0.5:
+            hourly_solar_map = solar_rad
+        else:
+            hourly_solar_map = solar_cloud
+
+        if sum(hourly_solar_map.values()) <= 0:
+            return current_target
+
+        daily_consumption = get_param(db, "daily_consumption_avg")
+        seasonal = SEASONAL_FACTOR.get(datetime.now().month, 1.0)
+        temps = [h["temperature"] for h in hourly if h.get("temperature") is not None]
+        avg_temp = sum(temps) / len(temps) if temps else None
+        temp_factor = get_temp_factor(db, avg_temp)
+
+        day_factor = get_day_factor(db, today)
+        hourly_consumption_map = build_hourly_consumption(daily_consumption, seasonal, temp_factor, day_factor)
+
+        # Binary search for minimum viable SOC — same as calculate_plan
+        safety_margin = get_param(db, "safety_margin_pct")
+        reserve_target = BATTERY_RESERVE_PCT + safety_margin
+
+        lo, hi = BATTERY_RESERVE_PCT, 100
+        for _ in range(15):
+            mid = (lo + hi) / 2.0
+            sim = simulate_battery_hourly(mid, hourly_solar_map, hourly_consumption_map)
+            if sim["min_soc"] >= reserve_target:
+                hi = mid
+            else:
+                lo = mid
+            if hi - lo < 1:
+                break
+
+        revised = int(((hi + 4) // 5) * 5)
+        sim = simulate_battery_hourly(revised, hourly_solar_map, hourly_consumption_map)
+
+        min_soc = get_param(db, "min_overnight_soc")
+        max_soc = get_param(db, "max_overnight_soc")
+        revised = max(min_soc, min(max_soc, revised))
+        revised = int(round(revised / 5) * 5)
+
+        if revised != current_target:
+            log.info(f"Simulation revision: optimal={revised}%, "
+                     f"min_soc={sim['min_soc']}% at {sim['min_soc_hour']}:00, "
+                     f"target {current_target}% -> {revised}%")
+        return revised
+
+    except Exception as e:
+        log.warning(f"Weather revision failed, keeping target {current_target}%: {e}")
+        return current_target
+
+
+def _write_charge_slots(ha, reserve_only=False, target_soc=None,
+                        start_hour=None, start_min=None, charge_power=None):
+    """Write Slot 1 and Slot 2 registers to control overnight charging.
+
+    If reserve_only=True, both slots are set to reserve SOC (no charging).
+    Otherwise, Slot 1 covers 00:00 to start_hour:start_min at reserve,
+    and Slot 2 covers start_hour:start_min to 07:00 at target_soc.
+    """
+    writes = []
+
+    if reserve_only:
+        # Both slots at outage reserve, default power, original times
+        writes.append((TOU_REGS["soc"][0], OUTAGE_RESERVE_PCT))
+        writes.append((TOU_REGS["soc"][1], OUTAGE_RESERVE_PCT))
+        writes.append((TOU_REGS["power"][0], CHARGE_POWER_DEFAULT))
+        writes.append((TOU_REGS["power"][1], CHARGE_POWER_DEFAULT))
+        # Reset times to defaults
+        writes.append((TOU_REGS["time"][0], encode_time(0, 0)))
+        writes.append((TOU_REGS["time"][1], encode_time(4, 0)))
+    else:
+        # Slot 1: 00:00 to charge start — outage reserve (30% safety floor)
+        writes.append((TOU_REGS["time"][0], encode_time(0, 0)))
+        writes.append((TOU_REGS["soc"][0], OUTAGE_RESERVE_PCT))
+        writes.append((TOU_REGS["power"][0], CHARGE_POWER_DEFAULT))
+
+        # Slot 2: charge start to 07:00 — target SOC at calculated power
+        writes.append((TOU_REGS["time"][1], encode_time(start_hour, start_min)))
+        writes.append((TOU_REGS["soc"][1], target_soc))
+        writes.append((TOU_REGS["power"][1], charge_power))
+
+    failed = []
+    for register, value in writes:
+        for attempt in range(3):
+            try:
+                ha.write_register(register, value)
+                time.sleep(0.5)
+                break
+            except Exception as e:
+                log.warning(f"Write register {register}={value} "
+                            f"attempt {attempt+1} failed: {e}")
+                if attempt == 2:
+                    failed.append((register, value, str(e)))
+                time.sleep(1)
+
+    if failed:
+        log.error(f"Failed to write {len(failed)} charge slot registers: {failed}")
+    else:
+        if reserve_only:
+            log.info("Charge slots set to reserve (no charging needed)")
+        else:
+            log.info(f"Charge slots updated: start={start_hour:02d}:{start_min:02d}, "
+                     f"SOC={target_soc}%, power={charge_power}W")
 
 
 # ---------------------------------------------------------------------------
@@ -855,6 +1817,76 @@ def update_learning(db):
         if abs(new_avg - current_avg) > 0.1:
             log.info(f"Learning: consumption avg {current_avg:.1f} -> {new_avg:.1f} kWh")
             set_param(db, "daily_consumption_avg", new_avg)
+
+    # --- Adjustment 4: Temperature-based consumption factors ---
+    # Group days by temperature band and compare actual vs expected consumption
+    temp_rows = [r for r in rows
+                 if r["actual_consumption_kwh"] is not None
+                 and r["temperature_high"] is not None]
+    current_consumption_avg = get_param(db, "daily_consumption_avg")
+
+    for threshold, param_key in TEMP_BANDS:
+        if threshold == 99:
+            band_days = [r for r in temp_rows if r["temperature_high"] >= 20]
+        else:
+            prev_threshold = 0
+            for t, _ in TEMP_BANDS:
+                if t == threshold:
+                    break
+                prev_threshold = t
+            band_days = [r for r in temp_rows
+                         if r["temperature_high"] >= prev_threshold
+                         and r["temperature_high"] < threshold]
+
+        if len(band_days) >= 2:
+            # Actual consumption ratio vs base average
+            avg_consumption = sum(r["actual_consumption_kwh"] for r in band_days) / len(band_days)
+            actual_ratio = avg_consumption / current_consumption_avg if current_consumption_avg > 0 else 1.0
+            current_factor = get_param(db, param_key)
+            # Move 20% toward measured ratio
+            new_factor = current_factor + 0.20 * (actual_ratio - current_factor)
+            new_factor = max(0.5, min(2.0, round(new_factor, 3)))
+            if abs(new_factor - current_factor) > 0.005:
+                log.info(f"Learning: {param_key} {current_factor:.3f} -> {new_factor:.3f} "
+                         f"(avg consumption: {avg_consumption:.1f} kWh at "
+                         f"{'<'+str(threshold) if threshold < 99 else '>=20'}°C, "
+                         f"n={len(band_days)})")
+                set_param(db, param_key, new_factor)
+
+    # --- Adjustment 5: Weekend vs weekday consumption factor ---
+    current_avg = get_param(db, "daily_consumption_avg")
+    if current_avg and current_avg > 0:
+        weekend_rows = [r for r in rows
+                        if r["actual_consumption_kwh"] is not None
+                        and datetime.strptime(r["date"], "%Y-%m-%d").date().weekday() in WEEKEND_DAYS]
+        weekday_rows = [r for r in rows
+                        if r["actual_consumption_kwh"] is not None
+                        and datetime.strptime(r["date"], "%Y-%m-%d").date().weekday() not in WEEKEND_DAYS]
+
+        if len(weekend_rows) >= 2:
+            avg_weekend = sum(r["actual_consumption_kwh"] for r in weekend_rows) / len(weekend_rows)
+            actual_ratio = avg_weekend / current_avg
+            current_factor = get_param(db, "weekend_factor")
+            new_factor = current_factor + 0.20 * (actual_ratio - current_factor)
+            new_factor = max(0.8, min(2.0, round(new_factor, 3)))
+            if abs(new_factor - current_factor) > 0.01:
+                log.info(f"Learning: weekend_factor {current_factor:.2f} -> {new_factor:.2f} "
+                         f"(avg {avg_weekend:.1f} kWh, n={len(weekend_rows)})")
+                set_param(db, "weekend_factor", new_factor)
+
+        if len(weekday_rows) >= 3:
+            avg_weekday = sum(r["actual_consumption_kwh"] for r in weekday_rows) / len(weekday_rows)
+            actual_ratio = avg_weekday / current_avg
+            current_factor = get_param(db, "weekday_factor")
+            new_factor = current_factor + 0.20 * (actual_ratio - current_factor)
+            new_factor = max(0.5, min(1.5, round(new_factor, 3)))
+            if abs(new_factor - current_factor) > 0.01:
+                log.info(f"Learning: weekday_factor {current_factor:.2f} -> {new_factor:.2f} "
+                         f"(avg {avg_weekday:.1f} kWh, n={len(weekday_rows)})")
+                set_param(db, "weekday_factor", new_factor)
+
+    # --- Adjustment 6: Solar model preference ---
+    update_model_preference(db)
 
 
 # ---------------------------------------------------------------------------
@@ -1000,11 +2032,13 @@ def main():
                       f"grid_charge={gc}")
 
         elif mode == "record":
+            backup_db()
             record_outcome(ha, db)
             write_dashboard_status(ha, db)
 
         elif mode == "poll":
             poll_snapshot(ha, db)
+            write_dashboard_status(ha, db)
 
         elif mode == "status":
             show_status(ha, db)

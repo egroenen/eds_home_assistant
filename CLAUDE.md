@@ -82,6 +82,65 @@ done
 ```
 **Note:** Do NOT pull `secrets.yaml` unnecessarily — it's already local.
 
+## Solar Optimizer (`solar_optimizer.py`)
+
+Self-learning battery charging optimizer for Deye hybrid inverter (15kWh battery, 10% reserve). Controls TOU charging via Solarman registers.
+
+### Key Files
+- `solar_optimizer.py` — main script (runs on HA at `/config/`)
+- `solar_optimizer.db` — SQLite database (learning params, plans, outcomes, hourly logs, forecast tracking)
+- `solar_optimizer_status.json` — dashboard data (read by command_line sensor every 5 min)
+- `add_dashboard_card.py` — creates/updates the dashboard summary card and detail view
+
+### Schedule (HA automations)
+- **Hourly** (`time_pattern /1h`) — `solar_poll`: record metrics, track forecast models, adjust overnight charging
+- **21:00** — `solar_record`: record daily outcome, backup DB, run learning
+- **21:05** — `solar_optimize`: calculate tomorrow's plan, write TOU registers
+
+### Charging Strategy
+- **Never charge before midnight** — Slot 6 (21:00-00:00) at reserve, grid charge disabled
+- **Defer charging** — Slot 1 (00:00-04:00) at reserve; hourly poll dynamically shifts Slot 2 start time so battery reaches target SOC by 06:30am
+- **Power scaling** — poll can increase charge power up to 10kW if running late
+
+### Weather Forecasts
+- **Primary**: MetOcean API (MetService NZ data) — `forecast-v2.metoceanapi.com`
+  - API key: `9AA6C9piwrQCsju1YppbyZ` (free plan)
+  - Location: Christchurch Parklands (-43.505, 172.698)
+  - Variables: `air.temperature.at-2m`, `cloud.cover`, `precipitation.rate`, `radiation.flux.downward.shortwave`
+  - Temps returned in **Kelvin** (subtract 273.15). Times in **UTC** (add 13h for NZDT)
+  - **Do not add unnecessary variables** — they cost money on the API plan
+- **Fallback**: HA weather entity (`weather.forecast_home`, met.no)
+
+### Dual Solar Forecast Models
+Both run in parallel, accuracy tracked hourly in `forecast_tracking` table:
+- **Model A (cloud)**: per-hour weather condition + cloud% correction × Forecast.Solar daily total
+- **Model B (radiation)**: shortwave radiation W/m² proportional distribution of Forecast.Solar total
+- `preferred_solar_model` param learned over time (0=cloud, 1=radiation, threshold 0.5)
+
+### Battery Simulation
+Hour-by-hour simulation through peak hours (7am-9pm) using:
+- `HOURLY_SOLAR_WEIGHT` — bell curve centered ~1pm
+- `HOURLY_CONSUMPTION_WEIGHT` — double-hump (morning + evening peaks)
+- Temperature-based consumption factor (4 bands: cold/cool/mild/warm)
+- Catches intra-day timing issues (e.g., cloudy morning draining battery before sunny afternoon)
+
+### Dashboard
+- **Summary card** on Home dashboard — plan vs actuals table with correction factors
+- **Detail view** (`/dashboard-home/solar-detail`) — tap summary card to open
+  - Hourly forecast table with both model predictions, consumption, battery SOC
+  - Learning parameters, model accuracy comparison
+- Card uses `card_mod` with `ha-markdown$` selector for shadow DOM styling
+- `add_dashboard_card.py` handles create/update — run on HA after pushing changes
+
+### Deye Inverter Registers
+- TOU registers: time (250-255), power (256-261), SOC (268-273), enable (274-279), master (248)
+- Time encoding: `hour * 100 + minute` (decimal packed)
+- Enable: 0=none, 1=grid charge, 2=gen charge, 3=both
+- Write via Solarman `write_multiple_holding_registers` service with 0.5s delay between writes
+
+### Database Backups
+Daily SQLite backup to `/config/backups/` before recording outcomes. Keeps last 7 days.
+
 ## Important Notes
 
 - **Always sync before editing** — changes made in the HA UI (automations, scenes) write directly to the YAML on the VM. Pull latest first to avoid overwriting.
@@ -91,3 +150,4 @@ done
 - The HA instance runs **HA OS 2026.3.3** with Supervisor.
 - Custom components: evnex, feedparser, hacs, solarman, waste_collection_schedule, xiaomi_home
 - User is in **New Zealand** — metric units, NZD power pricing schedules matter for automations.
+- **HA OS cron doesn't persist** across restarts — use HA automations for scheduled tasks, not cron.

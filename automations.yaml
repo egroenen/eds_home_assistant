@@ -1083,12 +1083,23 @@
       - delay: "00:00:30"
   mode: restart
 
+- id: 'solar_optimizer_poll'
+  alias: Solar Optimizer - Hourly Poll
+  description: Record hourly snapshot and adjust overnight charging
+  triggers:
+    - trigger: time_pattern
+      hours: "/1"
+  conditions: []
+  actions:
+    - action: shell_command.solar_poll
+  mode: single
+
 - id: 'solar_optimizer_record'
   alias: Solar Optimizer - Record Outcomes
   description: Record today's energy outcomes and update learning parameters
   triggers:
     - trigger: time
-      at: "21:30:00"
+      at: "21:00:00"
   conditions: []
   actions:
     - action: shell_command.solar_record
@@ -1099,7 +1110,7 @@
   description: Calculate and write tomorrow's battery charging plan
   triggers:
     - trigger: time
-      at: "22:00:00"
+      at: "21:05:00"
   conditions: []
   actions:
     - action: shell_command.solar_optimize
