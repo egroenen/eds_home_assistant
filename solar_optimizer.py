@@ -119,7 +119,16 @@ SENSORS = {
     "load_power": "sensor.inverter_total_load_power",
 }
 
-# Seasonal consumption factors (NZ seasons)
+# NZ seasons (month -> season name)
+NZ_SEASONS = {
+    12: "summer", 1: "summer", 2: "summer",
+    3: "autumn", 4: "autumn", 5: "autumn",
+    6: "winter", 7: "winter", 8: "winter",
+    9: "spring", 10: "spring", 11: "spring",
+}
+
+# Monthly consumption multipliers (applied to legacy daily_consumption_avg)
+# Used to seed seasonal averages with more realistic initial values
 SEASONAL_FACTOR = {
     1: 0.85, 2: 0.90, 3: 0.95, 4: 1.05, 5: 1.10, 6: 1.15,
     7: 1.15, 8: 1.10, 9: 1.05, 10: 0.95, 11: 0.90, 12: 0.85,
@@ -175,7 +184,12 @@ DEFAULT_PARAMS = {
     "partlycloudy_correction": 0.85,
     "rainy_correction": 0.45,
     "learning_rate": 2.0,
-    "daily_consumption_avg": 33.0,
+    "daily_consumption_avg": 33.0,  # legacy — used with SEASONAL_FACTOR for comparison
+    "consumption_avg_spring": 31.9,  # 33 × avg(Sep=1.05, Oct=0.95, Nov=0.90)
+    "consumption_avg_summer": 28.6,  # 33 × avg(Dec=0.85, Jan=0.85, Feb=0.90)
+    "consumption_avg_autumn": 34.1,  # 33 × avg(Mar=0.95, Apr=1.05, May=1.10)
+    "consumption_avg_winter": 37.4,  # 33 × avg(Jun=1.15, Jul=1.15, Aug=1.10)
+    "consumption_avg_year": 33.0,
     "min_overnight_soc": 30.0,
     "max_overnight_soc": 100.0,
     "safety_soc_floor": 15.0,
@@ -596,6 +610,14 @@ def init_db(db):
             model_cloud_kwh   REAL,
             model_rad_kwh     REAL,
             actual_pv_wh      REAL,
+            est_consumption_kwh REAL,
+            est_battery_soc   REAL,
+            actual_consumption_wh REAL,
+            actual_battery_soc REAL,
+            weather_condition TEXT,
+            cloud_pct         REAL,
+            temperature       REAL,
+            shortwave_wm2     REAL,
             PRIMARY KEY (date, hour)
         );
     """)
@@ -607,6 +629,21 @@ def init_db(db):
     except sqlite3.OperationalError:
         db.execute("ALTER TABLE daily_outcome ADD COLUMN temperature_high REAL")
         db.commit()
+
+    # Add forecast_tracking columns if missing (migration)
+    for col, coltype in [("est_consumption_kwh", "REAL"),
+                         ("est_battery_soc", "REAL"),
+                         ("actual_consumption_wh", "REAL"),
+                         ("actual_battery_soc", "REAL"),
+                         ("weather_condition", "TEXT"),
+                         ("cloud_pct", "REAL"),
+                         ("temperature", "REAL"),
+                         ("shortwave_wm2", "REAL")]:
+        try:
+            db.execute(f"SELECT {col} FROM forecast_tracking LIMIT 1")
+        except sqlite3.OperationalError:
+            db.execute(f"ALTER TABLE forecast_tracking ADD COLUMN {col} {coltype}")
+            db.commit()
 
     # Seed default params if empty
     cursor = db.execute("SELECT COUNT(*) FROM learning_params")
@@ -703,6 +740,23 @@ def build_hourly_consumption(daily_consumption, seasonal_factor, temp_factor, da
         hour: daily_consumption * weight * seasonal_factor * temp_factor * day_factor
         for hour, weight in HOURLY_CONSUMPTION_WEIGHT.items()
     }
+
+
+def get_season(target_date=None):
+    """Get NZ season name for a date."""
+    if target_date is None:
+        month = datetime.now().month
+    elif isinstance(target_date, str):
+        month = datetime.strptime(target_date, "%Y-%m-%d").month
+    else:
+        month = target_date.month
+    return NZ_SEASONS[month]
+
+
+def get_seasonal_consumption(db, target_date=None):
+    """Get the consumption average for the season of the given date."""
+    season = get_season(target_date)
+    return get_param(db, f"consumption_avg_{season}")
 
 
 def get_day_factor(db, target_date):
@@ -806,8 +860,8 @@ def calculate_plan(ha, db):
         hourly = ha.get_hourly_forecast(tomorrow_str)
 
     # Step 4: Build hourly solar and consumption profiles
-    daily_consumption = get_param(db, "daily_consumption_avg")
-    seasonal = SEASONAL_FACTOR.get(date.today().month, 1.0)
+    daily_consumption = get_seasonal_consumption(db, tomorrow_str)
+    season = get_season(tomorrow_str)
 
     if hourly and len(hourly) >= 6:
         # Model A: cloud-based corrections
@@ -815,9 +869,10 @@ def calculate_plan(ha, db):
         # Model B: shortwave radiation-based
         solar_rad = build_hourly_solar_radiation(raw_solar, hourly)
 
-        # Pick active model based on learned accuracy
-        preferred = get_param(db, "preferred_solar_model")  # 0=cloud, 1=radiation
-        if solar_rad and preferred and preferred >= 0.5:
+        # Prefer radiation model when shortwave data is available — it uses
+        # actual atmospheric measurements rather than crude cloud% corrections.
+        # Fall back to cloud model only when radiation data is missing.
+        if solar_rad and sum(solar_rad.values()) > 0:
             hourly_solar_map = solar_rad
             active_model = "radiation"
         else:
@@ -861,15 +916,15 @@ def calculate_plan(ha, db):
                  f"(daily fallback, correction: {correction_factor:.2f})")
 
     temp_factor = get_temp_factor(db, temp_high)
-    tomorrow_str = (date.today() + timedelta(days=1)).isoformat()
     day_factor = get_day_factor(db, tomorrow_str)
-    hourly_consumption_map = build_hourly_consumption(daily_consumption, seasonal, temp_factor, day_factor)
+    # Seasonal variation is captured in the seasonal consumption avg directly
+    hourly_consumption_map = build_hourly_consumption(daily_consumption, 1.0, temp_factor, day_factor)
     peak_consumption = sum(hourly_consumption_map.values())
     energy_deficit = max(0, peak_consumption - peak_solar)
 
     log.info(f"Peak consumption: {peak_consumption:.1f} kWh "
-             f"(seasonal={seasonal:.2f}, temp_factor={temp_factor:.2f}, "
-             f"day_factor={day_factor:.2f}), "
+             f"(season={season}, base={daily_consumption:.1f}, "
+             f"temp_factor={temp_factor:.2f}, day_factor={day_factor:.2f}), "
              f"peak solar: {peak_solar:.1f} kWh, "
              f"deficit: {energy_deficit:.1f} kWh")
 
@@ -1120,6 +1175,11 @@ def write_dashboard_status(ha, db, plan=None):
     status["learning"] = {
         "base_soc": get_param(db, "base_overnight_soc"),
         "consumption_avg": get_param(db, "daily_consumption_avg"),
+        "consumption_spring": get_param(db, "consumption_avg_spring"),
+        "consumption_summer": get_param(db, "consumption_avg_summer"),
+        "consumption_autumn": get_param(db, "consumption_avg_autumn"),
+        "consumption_winter": get_param(db, "consumption_avg_winter"),
+        "consumption_year": get_param(db, "consumption_avg_year"),
         "sunny_corr": get_param(db, "sunny_correction"),
         "cloudy_corr": get_param(db, "cloudy_correction"),
         "partly_corr": get_param(db, "partlycloudy_correction"),
@@ -1137,7 +1197,7 @@ def write_dashboard_status(ha, db, plan=None):
     # Model preference
     pref = get_param(db, "preferred_solar_model") or 0.0
     status["learning"]["model_pref"] = round(pref, 2)
-    status["learning"]["active_model"] = "radiation" if pref >= 0.5 else "cloud"
+    status["learning"]["active_model"] = "radiation"  # radiation preferred when available
 
     # Detailed hourly forecast for the detail view
     try:
@@ -1157,16 +1217,16 @@ def write_dashboard_status(ha, db, plan=None):
             solar_cloud = build_hourly_solar(raw_solar, hourly, db)
             solar_rad = build_hourly_solar_radiation(raw_solar, hourly)
 
-            daily_consumption = get_param(db, "daily_consumption_avg")
-            seasonal = SEASONAL_FACTOR.get(datetime.now().month, 1.0)
+            daily_consumption = get_seasonal_consumption(db, plan_date)
+            season = get_season(plan_date)
             temps = [h["temperature"] for h in hourly if h.get("temperature") is not None]
             avg_temp = sum(temps) / len(temps) if temps else None
             temp_factor = get_temp_factor(db, avg_temp)
             day_factor = get_day_factor(db, plan_date)
-            hourly_consumption_map = build_hourly_consumption(daily_consumption, seasonal, temp_factor, day_factor)
+            hourly_consumption_map = build_hourly_consumption(daily_consumption, 1.0, temp_factor, day_factor)
 
-            # Use active model for simulation
-            active_solar = solar_rad if (solar_rad and pref >= 0.5) else solar_cloud
+            # Use radiation model when available (matches plan/revision logic)
+            active_solar = solar_rad if (solar_rad and sum(solar_rad.values()) > 0) else solar_cloud
             soc_target = p.get("overnight_soc_target", 70) if p else 70
             sim = simulate_battery_hourly(soc_target, active_solar, hourly_consumption_map)
 
@@ -1205,7 +1265,8 @@ def write_dashboard_status(ha, db, plan=None):
                 "source": hourly_source,
                 "raw_solar": raw_solar,
                 "plan_date": plan_date,
-                "seasonal": seasonal,
+                "season": season,
+                "seasonal_avg": daily_consumption,
                 "temp_factor": round(temp_factor, 2),
                 "day_factor": round(day_factor, 2),
                 "avg_temp": round(avg_temp, 1) if avg_temp else None,
@@ -1372,17 +1433,17 @@ def poll_snapshot(ha, db):
 
     # --- Track dual solar forecast models during peak hours ---
     if PEAK_START_HOUR <= hour < PEAK_END_HOUR:
-        track_solar_models(ha, db, day, hour, pv_power)
+        track_solar_models(ha, db, day, hour, pv_power, battery_soc, load_power)
 
     # --- Dynamic overnight charge adjustment ---
     adjust_overnight_charging(ha, db, now, battery_soc)
 
 
-def track_solar_models(ha, db, day, hour, actual_pv_w):
-    """Track both solar forecast models against actual PV production.
+def track_solar_models(ha, db, day, hour, actual_pv_w, battery_soc, load_power_w):
+    """Track forecast models and consumption estimates against actuals.
 
-    Records each model's hourly prediction alongside actual PV watts.
-    The actual PV is a point-in-time sample (W), treated as ~Wh for the hour.
+    Records per-hour: both solar model predictions, consumption estimate,
+    simulated battery SOC, and actual PV/consumption/SOC for later analysis.
     """
     try:
         raw_solar = ha.get_sensor_float(SENSORS["solar_forecast_today"])
@@ -1401,17 +1462,51 @@ def track_solar_models(ha, db, day, hour, actual_pv_w):
 
         cloud_kwh = solar_cloud.get(hour, 0)
         rad_kwh = (solar_rad or {}).get(hour, 0)
-        actual_wh = actual_pv_w  # W ≈ Wh for 1-hour sample
+        actual_pv_wh = actual_pv_w  # W ≈ Wh for 1-hour sample
+
+        # Extract weather conditions for this hour from forecast
+        hour_fc = next((h for h in hourly if h["hour"] == hour), {})
+        wx_condition = hour_fc.get("condition")
+        wx_cloud = hour_fc.get("cloud_coverage")
+        wx_temp = hour_fc.get("temperature")
+        wx_sw = hour_fc.get("shortwave_wm2")
+
+        # Get consumption and battery sim estimates for this hour
+        daily_consumption = get_seasonal_consumption(db, day)
+        temps = [h["temperature"] for h in hourly if h.get("temperature") is not None]
+        avg_temp = sum(temps) / len(temps) if temps else None
+        temp_factor = get_temp_factor(db, avg_temp)
+        day_factor = get_day_factor(db, day)
+        hourly_consumption_map = build_hourly_consumption(daily_consumption, 1.0, temp_factor, day_factor)
+        est_consumption = hourly_consumption_map.get(hour, 0)
+
+        # Simulate battery to get estimated SOC at this hour
+        active_solar = solar_rad if (solar_rad and sum(solar_rad.values()) > 0) else solar_cloud
+        plan_row = db.execute(
+            "SELECT overnight_soc_target FROM daily_plan WHERE date=?", (day,)
+        ).fetchone()
+        starting_soc = plan_row["overnight_soc_target"] if plan_row else 70
+        sim = simulate_battery_hourly(starting_soc, active_solar, hourly_consumption_map)
+        sim_soc_map = dict(sim["hourly_soc"])
+        est_soc = sim_soc_map.get(hour)
 
         db.execute("""
             INSERT OR REPLACE INTO forecast_tracking
-            (date, hour, model_cloud_kwh, model_rad_kwh, actual_pv_wh)
-            VALUES (?, ?, ?, ?, ?)
-        """, (day, hour, round(cloud_kwh, 3), round(rad_kwh, 3), actual_wh))
+            (date, hour, model_cloud_kwh, model_rad_kwh, actual_pv_wh,
+             est_consumption_kwh, est_battery_soc, actual_consumption_wh, actual_battery_soc,
+             weather_condition, cloud_pct, temperature, shortwave_wm2)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (day, hour, round(cloud_kwh, 3), round(rad_kwh, 3), actual_pv_wh,
+              round(est_consumption, 3), est_soc,
+              load_power_w, battery_soc,
+              wx_condition, wx_cloud, wx_temp, wx_sw))
         db.commit()
 
         log.info(f"Model tracking h{hour}: cloud={cloud_kwh:.2f}kWh, "
-                 f"rad={rad_kwh:.2f}kWh, actual={actual_wh:.0f}Wh")
+                 f"rad={rad_kwh:.2f}kWh, actual_pv={actual_pv_wh:.0f}Wh, "
+                 f"est_cons={est_consumption:.2f}kWh, actual_load={load_power_w:.0f}W, "
+                 f"est_soc={est_soc}%, actual_soc={battery_soc}%, "
+                 f"wx={wx_condition}, cloud={wx_cloud}%, sw={wx_sw}W/m²")
 
     except Exception as e:
         log.warning(f"Model tracking failed: {e}")
@@ -1634,23 +1729,24 @@ def _maybe_revise_target(ha, db, today, current_target, current_soc):
         solar_cloud = build_hourly_solar(raw_solar, hourly, db)
         solar_rad = build_hourly_solar_radiation(raw_solar, hourly)
 
-        preferred = get_param(db, "preferred_solar_model")
-        if solar_rad and preferred and preferred >= 0.5:
+        # Prefer radiation model when shortwave data is available
+        if solar_rad and sum(solar_rad.values()) > 0:
             hourly_solar_map = solar_rad
+            active_model = "radiation"
         else:
             hourly_solar_map = solar_cloud
+            active_model = "cloud"
 
         if sum(hourly_solar_map.values()) <= 0:
             return current_target
 
-        daily_consumption = get_param(db, "daily_consumption_avg")
-        seasonal = SEASONAL_FACTOR.get(datetime.now().month, 1.0)
+        daily_consumption = get_seasonal_consumption(db, today)
         temps = [h["temperature"] for h in hourly if h.get("temperature") is not None]
         avg_temp = sum(temps) / len(temps) if temps else None
         temp_factor = get_temp_factor(db, avg_temp)
 
         day_factor = get_day_factor(db, today)
-        hourly_consumption_map = build_hourly_consumption(daily_consumption, seasonal, temp_factor, day_factor)
+        hourly_consumption_map = build_hourly_consumption(daily_consumption, 1.0, temp_factor, day_factor)
 
         # Binary search for minimum viable SOC — same as calculate_plan
         safety_margin = get_param(db, "safety_margin_pct")
@@ -1675,10 +1771,14 @@ def _maybe_revise_target(ha, db, today, current_target, current_soc):
         revised = max(min_soc, min(max_soc, revised))
         revised = int(round(revised / 5) * 5)
 
+        cloud_total = sum(solar_cloud.values())
+        rad_total = sum(solar_rad.values()) if solar_rad else 0
+        log.info(f"Revision sim ({active_model}): solar cloud={cloud_total:.1f}kWh, "
+                 f"rad={rad_total:.1f}kWh, "
+                 f"min_soc={sim['min_soc']}% at {sim['min_soc_hour']}:00, "
+                 f"optimal={revised}%, current_target={current_target}%")
         if revised != current_target:
-            log.info(f"Simulation revision: optimal={revised}%, "
-                     f"min_soc={sim['min_soc']}% at {sim['min_soc_hour']}:00, "
-                     f"target {current_target}% -> {revised}%")
+            log.info(f"Target revised: {current_target}% -> {revised}%")
         return revised
 
     except Exception as e:
@@ -1806,7 +1906,7 @@ def update_learning(db):
                          f"(avg accuracy: {avg_accuracy:.2f}, n={len(condition_days)})")
                 set_param(db, param_key, new_val)
 
-    # --- Adjustment 3: Daily consumption average ---
+    # --- Adjustment 3: Daily consumption average (legacy — kept for comparison) ---
     consumption_vals = [r["actual_consumption_kwh"] for r in rows
                         if r["actual_consumption_kwh"] is not None]
     if len(consumption_vals) >= 7:
@@ -1817,6 +1917,36 @@ def update_learning(db):
         if abs(new_avg - current_avg) > 0.1:
             log.info(f"Learning: consumption avg {current_avg:.1f} -> {new_avg:.1f} kWh")
             set_param(db, "daily_consumption_avg", new_avg)
+
+    # --- Adjustment 3b: Seasonal consumption averages ---
+    # Group outcomes by NZ season and update each season's average
+    consumption_rows = [r for r in rows if r["actual_consumption_kwh"] is not None]
+    season_groups = {}
+    for r in consumption_rows:
+        month = datetime.strptime(r["date"], "%Y-%m-%d").month
+        s = NZ_SEASONS[month]
+        season_groups.setdefault(s, []).append(r["actual_consumption_kwh"])
+    for s, vals in season_groups.items():
+        if len(vals) >= 3:
+            rolling_avg = sum(vals) / len(vals)
+            param_key = f"consumption_avg_{s}"
+            current_avg = get_param(db, param_key)
+            new_avg = current_avg + 0.30 * (rolling_avg - current_avg)
+            new_avg = round(new_avg, 1)
+            if abs(new_avg - current_avg) > 0.1:
+                log.info(f"Learning: {param_key} {current_avg:.1f} -> {new_avg:.1f} kWh "
+                         f"(n={len(vals)})")
+                set_param(db, param_key, new_avg)
+    # Year average — across all seasons
+    all_consumption = [r["actual_consumption_kwh"] for r in consumption_rows]
+    if len(all_consumption) >= 7:
+        rolling_avg = sum(all_consumption) / len(all_consumption)
+        current_avg = get_param(db, "consumption_avg_year")
+        new_avg = current_avg + 0.30 * (rolling_avg - current_avg)
+        new_avg = round(new_avg, 1)
+        if abs(new_avg - current_avg) > 0.1:
+            log.info(f"Learning: consumption_avg_year {current_avg:.1f} -> {new_avg:.1f} kWh")
+            set_param(db, "consumption_avg_year", new_avg)
 
     # --- Adjustment 4: Temperature-based consumption factors ---
     # Group days by temperature band and compare actual vs expected consumption
@@ -2003,7 +2133,10 @@ def main():
             plan = calculate_plan(ha, db)
             success = write_tou_config(ha, plan)
             store_plan(db, plan)
-            write_dashboard_status(ha, db, plan)
+            # Let write_dashboard_status auto-select which plan to show
+            # (today's during the day, tomorrow's after 9pm) rather than
+            # forcing the new plan which would wipe today's actuals
+            write_dashboard_status(ha, db)
             print(f"Optimization complete for {plan['date']}:")
             print(f"  Overnight SOC target: {plan['overnight_soc_target']}%")
             print(f"  Solar forecast: {plan['solar_forecast_kwh']:.1f} kWh "
