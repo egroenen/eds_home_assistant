@@ -4,3 +4,5 @@ secrets.yaml
 *.db-shm
 *.db-wal
 .venv/
+.sfdx/
+__pycache__/
