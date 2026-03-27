@@ -104,7 +104,7 @@ Self-learning battery charging optimizer for Deye hybrid inverter (15kWh battery
 
 ### Weather Forecasts
 - **Primary**: MetOcean API (MetService NZ data) — `forecast-v2.metoceanapi.com`
-  - API key: `9AA6C9piwrQCsju1YppbyZ` (free plan)
+  - API key: stored in `.env` as `METOCEAN_API_KEY` (free plan)
   - Location: Christchurch Parklands (-43.505, 172.698)
   - Variables: `air.temperature.at-2m`, `cloud.cover`, `precipitation.rate`, `radiation.flux.downward.shortwave`
   - Temps returned in **Kelvin** (subtract 273.15). Times in **UTC** (add 13h for NZDT)

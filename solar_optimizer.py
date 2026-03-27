@@ -41,7 +41,7 @@ ENV_PATH = SCRIPT_DIR / ".env"
 
 # MetOcean API (MetService) — primary weather source for NZ
 METOCEAN_API_URL = "https://forecast-v2.metoceanapi.com/point/time"
-METOCEAN_API_KEY = "9AA6C9piwrQCsju1YppbyZ"
+METOCEAN_API_KEY = None  # loaded from .env
 METOCEAN_LAT = -43.505   # Christchurch, Parklands
 METOCEAN_LON = 172.698
 
@@ -249,6 +249,12 @@ def load_env():
     if not server or not token:
         log.error("HASS_SERVER and HASS_TOKEN must be set")
         sys.exit(1)
+
+    global METOCEAN_API_KEY
+    METOCEAN_API_KEY = os.environ.get("METOCEAN_API_KEY")
+    if not METOCEAN_API_KEY:
+        log.warning("METOCEAN_API_KEY not set — MetOcean forecasts will be unavailable")
+
     return server, token
 
 
