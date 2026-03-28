@@ -26,19 +26,26 @@ A self-learning battery charging optimizer for the Deye hybrid inverter, located
 
 **Key features:**
 - Dual solar forecast models (cloud-cover and shortwave radiation), accuracy tracked over time
+- Per-hour shortwave efficiency learning -- accounts for panels facing different directions producing differently at different times of day
 - Hour-by-hour battery simulation through peak hours with temperature-based consumption adjustments
 - Deferred overnight charging -- dynamically shifts charge window to reach target SOC by 6:30 am
-- Daily learning cycle that adjusts weather correction factors and seasonal consumption averages
-- Dashboard card with detail view showing forecasts, actuals, and learning parameters
+- Time-aware planning -- safe to run `optimize` at any time; before 06:30 plans for today, after plans for tomorrow; register writes deferred during overnight charging
+- Forecast freezing at 7am -- hourly forecast locked into DB at peak start for stable daytime tracking against actuals
+- Daily learning cycle that adjusts weather corrections, seasonal consumption, temperature factors, weekend/weekday patterns, and shortwave efficiency
+- Dashboard with summary card, hourly detail view (Solar Detail tab), and historical plan-vs-actual table (Solar History tab)
 
 **Schedule (via HA automations):**
-- Hourly -- poll metrics, track forecasts, adjust charging
-- 21:00 -- record daily outcome, backup DB, run learning
+- Hourly -- poll metrics, track forecast models against actuals, adjust overnight charging
+- 21:00 -- record daily outcome, backup DB, run learning (including per-hour SW efficiency), write history
 - 21:05 -- calculate tomorrow's plan, write TOU registers
 
 **Weather data:**
 - Primary: MetOcean API (MetService NZ)
 - Fallback: HA weather entity (met.no)
+
+**Radiation model:**
+
+The radiation model converts MetOcean shortwave radiation forecasts (W/m²) directly into predicted production using per-hour learned efficiency factors (`sw_efficiency_7` through `sw_efficiency_20`). Each hour has its own factor because panels face different directions -- morning sun favours east-facing panels while afternoon sun favours west-facing. The efficiency is learned nightly from the median ratio of actual PV output to forecast shortwave, blended with a 0.3 learning rate. This replaces the original approach of proportionally distributing Forecast.Solar's daily total.
 
 ## Helper Script
 

@@ -246,3 +246,13 @@ command_line:
         - days_of_data
         - detail
       scan_interval: 300
+  - sensor:
+      name: Solar Optimizer History
+      unique_id: solar_optimizer_history
+      command: "cat /config/solar_optimizer_history.json 2>/dev/null || echo '{\"days\":[]}'"
+      value_template: "{{ value_json.days | length }}"
+      unit_of_measurement: "days"
+      json_attributes:
+        - updated_at
+        - days
+      scan_interval: 3600

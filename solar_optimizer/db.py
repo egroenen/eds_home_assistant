@@ -113,6 +113,13 @@ def init_db(db):
             db.execute(f"ALTER TABLE forecast_tracking ADD COLUMN {col} {coltype}")
             db.commit()
 
+    # Add frozen_detail column to daily_plan if missing (migration)
+    try:
+        db.execute("SELECT frozen_detail FROM daily_plan LIMIT 1")
+    except sqlite3.OperationalError:
+        db.execute("ALTER TABLE daily_plan ADD COLUMN frozen_detail TEXT")
+        db.commit()
+
     # Seed default params if empty
     cursor = db.execute("SELECT COUNT(*) FROM learning_params")
     if cursor.fetchone()[0] == 0:

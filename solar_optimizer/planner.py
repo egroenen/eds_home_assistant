@@ -1,29 +1,60 @@
 """Decision algorithm for overnight charging plan."""
 
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from .config import (
     SENSORS, CONDITION_MAP, FAILSAFE_OVERNIGHT_SOC,
     BATTERY_RESERVE_PCT, USABLE_CAPACITY_KWH, OUTAGE_RESERVE_PCT,
-    HOURLY_SOLAR_WEIGHT,
+    HOURLY_SOLAR_WEIGHT, CHARGE_DEADLINE_HOUR, CHARGE_DEADLINE_MIN,
 )
 from .db import get_param
 from .models import (
     build_hourly_solar, build_hourly_solar_radiation,
     build_hourly_consumption, get_season, get_seasonal_consumption,
     get_day_factor, get_temp_factor, simulate_battery_hourly,
+    get_sw_efficiency_map,
 )
 from .metocean import get_metocean_hourly
 
 log = logging.getLogger("solar_optimizer")
 
 
+def get_plan_date():
+    """Determine which date we are planning for.
+
+    Before the charge deadline (06:30), we are still in the overnight window
+    charging for today, so plan for today.  After that, plan for tomorrow.
+    """
+    now = datetime.now()
+    deadline_minutes = CHARGE_DEADLINE_HOUR * 60 + CHARGE_DEADLINE_MIN
+    now_minutes = now.hour * 60 + now.minute
+    if now_minutes < deadline_minutes:
+        return date.today()
+    return date.today() + timedelta(days=1)
+
+
+def is_overnight_charging_window():
+    """Return True if we are in the overnight charging window (00:00-06:30)."""
+    now = datetime.now()
+    deadline_minutes = CHARGE_DEADLINE_HOUR * 60 + CHARGE_DEADLINE_MIN
+    now_minutes = now.hour * 60 + now.minute
+    return now_minutes < deadline_minutes
+
+
 def calculate_plan(ha, db):
-    """Calculate optimal TOU settings for tomorrow."""
+    """Calculate optimal TOU settings for the next plan date."""
+
+    plan_date = get_plan_date()
+    planning_for_today = (plan_date == date.today())
+    forecast_sensor = (SENSORS["solar_forecast_today"] if planning_for_today
+                       else SENSORS["solar_forecast_tomorrow"])
+
+    log.info(f"Planning for {plan_date} "
+             f"({'today' if planning_for_today else 'tomorrow'})")
 
     # Step 1: Get solar forecast
-    raw_solar = ha.get_sensor_float(SENSORS["solar_forecast_tomorrow"])
+    raw_solar = ha.get_sensor_float(forecast_sensor)
     if raw_solar is None or raw_solar <= 0:
         log.warning("Solar forecast unavailable or zero, using failsafe")
         return make_failsafe_plan("no_forecast")
@@ -53,18 +84,19 @@ def calculate_plan(ha, db):
         temp_high = weather.get("temperature")
 
     # Step 3: Get hourly forecast — MetOcean primary, HA fallback
-    tomorrow_str = (date.today() + timedelta(days=1)).isoformat()
-    hourly = get_metocean_hourly(tomorrow_str)
+    plan_date_str = plan_date.isoformat()
+    hourly = get_metocean_hourly(plan_date_str)
     if not hourly:
-        hourly = ha.get_hourly_forecast(tomorrow_str)
+        hourly = ha.get_hourly_forecast(plan_date_str)
 
     # Step 4: Build hourly solar and consumption profiles
-    daily_consumption = get_seasonal_consumption(db, tomorrow_str)
-    season = get_season(tomorrow_str)
+    daily_consumption = get_seasonal_consumption(db, plan_date_str)
+    season = get_season(plan_date_str)
 
     if hourly and len(hourly) >= 6:
         solar_cloud = build_hourly_solar(raw_solar, hourly, db)
-        solar_rad = build_hourly_solar_radiation(raw_solar, hourly)
+        sw_eff_map = get_sw_efficiency_map(db)
+        solar_rad = build_hourly_solar_radiation(raw_solar, hourly, sw_eff_map)
 
         if solar_rad and sum(solar_rad.values()) > 0:
             hourly_solar_map = solar_rad
@@ -107,7 +139,7 @@ def calculate_plan(ha, db):
                  f"(daily fallback, correction: {correction_factor:.2f})")
 
     temp_factor = get_temp_factor(db, temp_high)
-    day_factor = get_day_factor(db, tomorrow_str)
+    day_factor = get_day_factor(db, plan_date_str)
     hourly_consumption_map = build_hourly_consumption(daily_consumption, 1.0, temp_factor, day_factor)
     peak_consumption = sum(hourly_consumption_map.values())
     energy_deficit = max(0, peak_consumption - peak_solar)
@@ -166,9 +198,8 @@ def calculate_plan(ha, db):
         OUTAGE_RESERVE_PCT,
     ]
 
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
     return {
-        "date": tomorrow,
+        "date": plan_date_str,
         "solar_forecast_kwh": raw_solar,
         "weather_condition": condition,
         "cloud_coverage_pct": cloud_pct,
@@ -185,9 +216,9 @@ def calculate_plan(ha, db):
 def make_failsafe_plan(reason):
     """Return a conservative failsafe plan."""
     log.warning(f"Using failsafe plan (reason: {reason})")
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    plan_date_str = get_plan_date().isoformat()
     return {
-        "date": tomorrow,
+        "date": plan_date_str,
         "solar_forecast_kwh": 0,
         "weather_condition": "unknown",
         "cloud_coverage_pct": 100,

@@ -151,6 +151,22 @@ DEFAULT_PARAMS = {
     "temp_factor_cool": 1.15,
     "temp_factor_mild": 1.0,
     "temp_factor_warm": 0.85,
+    # Per-hour shortwave efficiency (kWh produced per W/m² of shortwave radiation).
+    # Varies by hour because panels face different directions.
+    "sw_efficiency_7": 0.018,
+    "sw_efficiency_8": 0.018,
+    "sw_efficiency_9": 0.018,
+    "sw_efficiency_10": 0.018,
+    "sw_efficiency_11": 0.018,
+    "sw_efficiency_12": 0.018,
+    "sw_efficiency_13": 0.018,
+    "sw_efficiency_14": 0.018,
+    "sw_efficiency_15": 0.018,
+    "sw_efficiency_16": 0.018,
+    "sw_efficiency_17": 0.018,
+    "sw_efficiency_18": 0.018,
+    "sw_efficiency_19": 0.018,
+    "sw_efficiency_20": 0.018,
 }
 
 FAILSAFE_OVERNIGHT_SOC = 80

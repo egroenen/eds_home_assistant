@@ -4,12 +4,13 @@ import json
 import logging
 from datetime import date, datetime, timedelta
 
-from .config import SENSORS, SCRIPT_DIR
+from .config import SENSORS, SCRIPT_DIR, PEAK_START_HOUR
 from .db import get_param
 from .models import (
     build_hourly_solar, build_hourly_solar_radiation,
     build_hourly_consumption, get_season, get_seasonal_consumption,
     get_temp_factor, get_day_factor, simulate_battery_hourly,
+    get_sw_efficiency_map,
 )
 from .metocean import get_metocean_hourly
 
@@ -128,84 +129,162 @@ def write_dashboard_status(ha, db, plan=None):
 
     pref = get_param(db, "preferred_solar_model") or 0.0
     status["learning"]["model_pref"] = round(pref, 2)
+
+    # Per-hour shortwave efficiency
+    sw_eff = {}
+    for h in range(7, 21):
+        v = get_param(db, f"sw_efficiency_{h}")
+        sw_eff[h] = round(v, 4) if v else 0.018
+    status["learning"]["sw_efficiency"] = sw_eff
     status["learning"]["active_model"] = "radiation"
 
     # Detailed hourly forecast for the detail view
+    #
+    # Before peak hours (7am), we recalculate the forecast each poll so it
+    # reflects the latest weather data and SOC target.  At 7am (or the first
+    # poll after), we freeze the forecast into the daily_plan row so that
+    # daytime tracking compares actuals against a stable baseline.
     try:
         plan_date = p.get("date", today) if p else today
-        raw_solar = ha.get_sensor_float(
-            SENSORS["solar_forecast_today"] if plan_date == today
-            else SENSORS["solar_forecast_tomorrow"]
-        )
+        now_hour = datetime.now().hour
+        frozen = None
 
-        hourly = get_metocean_hourly(plan_date)
-        hourly_source = "metocean"
-        if not hourly:
-            hourly = ha.get_hourly_forecast(plan_date)
-            hourly_source = "ha"
+        # During peak hours, try to use the frozen forecast
+        if now_hour >= PEAK_START_HOUR and plan_date == today:
+            frozen_row = db.execute(
+                "SELECT frozen_detail FROM daily_plan WHERE date=?",
+                (plan_date,)
+            ).fetchone()
+            if frozen_row and frozen_row["frozen_detail"]:
+                frozen = json.loads(frozen_row["frozen_detail"])
 
-        if hourly and len(hourly) >= 6 and raw_solar and raw_solar > 0:
-            solar_cloud = build_hourly_solar(raw_solar, hourly, db)
-            solar_rad = build_hourly_solar_radiation(raw_solar, hourly)
-
-            daily_consumption = get_seasonal_consumption(db, plan_date)
-            season = get_season(plan_date)
-            temps = [h["temperature"] for h in hourly if h.get("temperature") is not None]
-            avg_temp = sum(temps) / len(temps) if temps else None
-            temp_factor = get_temp_factor(db, avg_temp)
-            day_factor = get_day_factor(db, plan_date)
-            hourly_consumption_map = build_hourly_consumption(daily_consumption, 1.0, temp_factor, day_factor)
-
-            active_solar = solar_rad if (solar_rad and sum(solar_rad.values()) > 0) else solar_cloud
-            soc_target = p.get("overnight_soc_target", 70) if p else 70
-            sim = simulate_battery_hourly(soc_target, active_solar, hourly_consumption_map)
-
+        if frozen:
+            # Use frozen forecast, but update actuals from hourly_log + forecast_tracking
             actual_soc_rows = db.execute(
                 "SELECT hour, battery_soc FROM hourly_log WHERE date=? ORDER BY hour",
                 (plan_date,)
             ).fetchall()
             actual_soc_by_hour = {r["hour"]: r["battery_soc"] for r in actual_soc_rows}
 
-            sim_soc_map = dict(sim["hourly_soc"])
-            detail_hours = []
-            for hfc in hourly:
-                h = hfc["hour"]
-                forecast_soc = sim_soc_map.get(h)
+            actual_pv_rows = db.execute(
+                "SELECT hour, actual_pv_wh FROM forecast_tracking WHERE date=? ORDER BY hour",
+                (plan_date,)
+            ).fetchall()
+            actual_pv_by_hour = {r["hour"]: r["actual_pv_wh"] for r in actual_pv_rows}
+
+            for h_entry in frozen["hours"]:
+                h = h_entry["hour"]
                 actual_soc = actual_soc_by_hour.get(h)
-                diff = None
+                h_entry["actual_soc"] = actual_soc
+                forecast_soc = h_entry.get("battery_soc")
                 if forecast_soc is not None and actual_soc is not None:
-                    diff = round(actual_soc - forecast_soc, 1)
-                detail_hours.append({
-                    "hour": h,
-                    "condition": hfc["condition"],
-                    "cloud": round(hfc.get("cloud_coverage", 0)),
-                    "temp": hfc.get("temperature"),
-                    "sw_wm2": hfc.get("shortwave_wm2"),
-                    "solar_cloud": round(solar_cloud.get(h, 0), 2),
-                    "solar_rad": round((solar_rad or {}).get(h, 0), 2),
-                    "consumption": round(hourly_consumption_map.get(h, 0), 2),
-                    "battery_soc": forecast_soc,
-                    "actual_soc": actual_soc,
-                    "soc_diff": diff,
-                })
+                    h_entry["soc_diff"] = round(actual_soc - forecast_soc, 1)
+                else:
+                    h_entry["soc_diff"] = None
+                actual_pv = actual_pv_by_hour.get(h)
+                h_entry["actual_pv_kwh"] = round(actual_pv / 1000, 2) if actual_pv is not None else None
 
-            status["detail"] = {
-                "source": hourly_source,
-                "raw_solar": raw_solar,
-                "plan_date": plan_date,
-                "season": season,
-                "seasonal_avg": daily_consumption,
-                "temp_factor": round(temp_factor, 2),
-                "day_factor": round(day_factor, 2),
-                "avg_temp": round(avg_temp, 1) if avg_temp else None,
-                "cloud_total": round(sum(solar_cloud.values()), 1),
-                "rad_total": round(sum(solar_rad.values()), 1) if solar_rad else None,
-                "consumption_total": round(sum(hourly_consumption_map.values()), 1),
-                "sim_min_soc": sim["min_soc"],
-                "sim_min_hour": sim["min_soc_hour"],
-                "hours": detail_hours,
-            }
+            status["detail"] = frozen
+        else:
+            # Recalculate forecast (pre-7am or no frozen data yet)
+            raw_solar = ha.get_sensor_float(
+                SENSORS["solar_forecast_today"] if plan_date == today
+                else SENSORS["solar_forecast_tomorrow"]
+            )
 
+            hourly = get_metocean_hourly(plan_date)
+            hourly_source = "metocean"
+            if not hourly:
+                hourly = ha.get_hourly_forecast(plan_date)
+                hourly_source = "ha"
+
+            if hourly and len(hourly) >= 6 and raw_solar and raw_solar > 0:
+                solar_cloud = build_hourly_solar(raw_solar, hourly, db)
+                sw_eff_map = get_sw_efficiency_map(db)
+                solar_rad = build_hourly_solar_radiation(raw_solar, hourly, sw_eff_map)
+
+                daily_consumption = get_seasonal_consumption(db, plan_date)
+                season = get_season(plan_date)
+                temps = [h["temperature"] for h in hourly if h.get("temperature") is not None]
+                avg_temp = sum(temps) / len(temps) if temps else None
+                temp_factor = get_temp_factor(db, avg_temp)
+                day_factor = get_day_factor(db, plan_date)
+                hourly_consumption_map = build_hourly_consumption(daily_consumption, 1.0, temp_factor, day_factor)
+
+                active_solar = solar_rad if (solar_rad and sum(solar_rad.values()) > 0) else solar_cloud
+                soc_target = p.get("overnight_soc_target", 70) if p else 70
+                sim = simulate_battery_hourly(soc_target, active_solar, hourly_consumption_map)
+
+                actual_soc_rows = db.execute(
+                    "SELECT hour, battery_soc FROM hourly_log WHERE date=? ORDER BY hour",
+                    (plan_date,)
+                ).fetchall()
+                actual_soc_by_hour = {r["hour"]: r["battery_soc"] for r in actual_soc_rows}
+
+                actual_pv_rows = db.execute(
+                    "SELECT hour, actual_pv_wh FROM forecast_tracking WHERE date=? ORDER BY hour",
+                    (plan_date,)
+                ).fetchall()
+                actual_pv_by_hour = {r["hour"]: r["actual_pv_wh"] for r in actual_pv_rows}
+
+                sim_soc_map = dict(sim["hourly_soc"])
+                detail_hours = []
+                for hfc in hourly:
+                    h = hfc["hour"]
+                    forecast_soc = sim_soc_map.get(h)
+                    actual_soc = actual_soc_by_hour.get(h)
+                    actual_pv = actual_pv_by_hour.get(h)
+                    diff = None
+                    if forecast_soc is not None and actual_soc is not None:
+                        diff = round(actual_soc - forecast_soc, 1)
+                    detail_hours.append({
+                        "hour": h,
+                        "condition": hfc["condition"],
+                        "cloud": round(hfc.get("cloud_coverage", 0)),
+                        "temp": hfc.get("temperature"),
+                        "sw_wm2": hfc.get("shortwave_wm2"),
+                        "solar_cloud": round(solar_cloud.get(h, 0), 2),
+                        "solar_rad": round((solar_rad or {}).get(h, 0), 2),
+                        "actual_pv_kwh": round(actual_pv / 1000, 2) if actual_pv is not None else None,
+                        "consumption": round(hourly_consumption_map.get(h, 0), 2),
+                        "battery_soc": forecast_soc,
+                        "actual_soc": actual_soc,
+                        "soc_diff": diff,
+                    })
+
+                detail = {
+                    "source": hourly_source,
+                    "raw_solar": raw_solar,
+                    "plan_date": plan_date,
+                    "season": season,
+                    "seasonal_avg": daily_consumption,
+                    "temp_factor": round(temp_factor, 2),
+                    "day_factor": round(day_factor, 2),
+                    "avg_temp": round(avg_temp, 1) if avg_temp else None,
+                    "cloud_total": round(sum(solar_cloud.values()), 1),
+                    "rad_total": round(sum(solar_rad.values()), 1) if solar_rad else None,
+                    "consumption_total": round(sum(hourly_consumption_map.values()), 1),
+                    "sim_min_soc": sim["min_soc"],
+                    "sim_min_hour": sim["min_soc_hour"],
+                    "hours": detail_hours,
+                }
+                status["detail"] = detail
+
+                # Freeze the forecast at 7am for daytime tracking
+                if now_hour >= PEAK_START_HOUR and plan_date == today:
+                    frozen_row = db.execute(
+                        "SELECT frozen_detail FROM daily_plan WHERE date=?",
+                        (plan_date,)
+                    ).fetchone()
+                    if frozen_row and not frozen_row["frozen_detail"]:
+                        db.execute(
+                            "UPDATE daily_plan SET frozen_detail=? WHERE date=?",
+                            (json.dumps(detail), plan_date)
+                        )
+                        db.commit()
+                        log.info(f"Frozen forecast detail for {plan_date}")
+
+        if "detail" in status:
             tracking = db.execute("""
                 SELECT date,
                        SUM(ABS(model_cloud_kwh * 1000 - actual_pv_wh)) as cloud_err,
@@ -230,6 +309,85 @@ def write_dashboard_status(ha, db, plan=None):
     status_path = SCRIPT_DIR / "solar_optimizer_status.json"
     status_path.write_text(json.dumps(status, indent=2))
     log.info(f"Dashboard status written to {status_path}")
+
+
+def write_history_status(db):
+    """Write historical plan-vs-actual data to a JSON file for the dashboard."""
+    rows = db.execute("""
+        SELECT p.date, p.weather_condition AS plan_weather,
+               p.solar_forecast_kwh AS forecast_kwh,
+               p.adjusted_solar_kwh AS adjusted_kwh,
+               p.overnight_soc_target AS soc_target,
+               p.energy_deficit_kwh AS deficit_kwh,
+               p.correction_factor AS correction,
+               o.actual_production_kwh AS production_kwh,
+               o.actual_consumption_kwh AS consumption_kwh,
+               o.grid_bought_kwh,
+               o.grid_sold_kwh,
+               o.peak_grid_kwh,
+               o.peak_grid_used,
+               o.forecast_accuracy,
+               o.weather_condition AS actual_weather,
+               o.temperature_high AS temp_high
+        FROM daily_plan p
+        LEFT JOIN daily_outcome o ON p.date = o.date
+        WHERE o.date IS NOT NULL
+        ORDER BY p.date DESC
+        LIMIT 30
+    """).fetchall()
+
+    history = []
+    for r in rows:
+        production = r["production_kwh"]
+        consumption = r["consumption_kwh"]
+        forecast = r["forecast_kwh"]
+        grid_bought = r["grid_bought_kwh"]
+        peak_grid = r["peak_grid_kwh"]
+        grid_sold = r["grid_sold_kwh"]
+        adjusted = r["adjusted_kwh"]
+
+        # Off-peak grid = total grid bought minus peak grid bought
+        off_peak_grid = round(grid_bought - peak_grid, 1) if (
+            grid_bought is not None and peak_grid is not None) else None
+
+        # Solar delta: actual production vs forecast
+        solar_delta = round(production - forecast, 1) if (
+            production is not None and forecast is not None) else None
+
+        # Net balance: production - consumption
+        net_balance = round(production - consumption, 1) if (
+            production is not None and consumption is not None) else None
+
+        history.append({
+            "date": r["date"],
+            "plan_weather": r["plan_weather"],
+            "actual_weather": r["actual_weather"],
+            "forecast_kwh": round(forecast, 1) if forecast else None,
+            "adjusted_kwh": round(adjusted, 1) if adjusted else None,
+            "production_kwh": round(production, 1) if production else None,
+            "solar_delta": solar_delta,
+            "consumption_kwh": round(consumption, 1) if consumption else None,
+            "net_balance": net_balance,
+            "grid_bought_kwh": round(grid_bought, 1) if grid_bought else None,
+            "off_peak_grid_kwh": off_peak_grid,
+            "peak_grid_kwh": round(peak_grid, 1) if peak_grid is not None else None,
+            "grid_sold_kwh": round(grid_sold, 1) if grid_sold else None,
+            "soc_target": r["soc_target"],
+            "deficit_kwh": round(r["deficit_kwh"], 1) if r["deficit_kwh"] else None,
+            "correction": round(r["correction"], 2) if r["correction"] else None,
+            "forecast_accuracy": round(r["forecast_accuracy"], 2) if r["forecast_accuracy"] else None,
+            "peak_grid_used": bool(r["peak_grid_used"]),
+            "temp_high": round(r["temp_high"], 1) if r["temp_high"] is not None else None,
+        })
+
+    status = {
+        "updated_at": datetime.now().strftime("%H:%M %d %b"),
+        "days": history,
+    }
+
+    history_path = SCRIPT_DIR / "solar_optimizer_history.json"
+    history_path.write_text(json.dumps(status, indent=2))
+    log.info(f"History status written to {history_path}")
 
 
 def show_status(ha, db):

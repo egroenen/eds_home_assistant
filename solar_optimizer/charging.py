@@ -14,6 +14,7 @@ from .models import (
     build_hourly_solar, build_hourly_solar_radiation,
     build_hourly_consumption, get_seasonal_consumption,
     get_temp_factor, get_day_factor, simulate_battery_hourly,
+    get_sw_efficiency_map,
 )
 from .metocean import get_metocean_hourly
 from .registers import encode_time
@@ -143,7 +144,8 @@ def _maybe_revise_target(ha, db, today, current_target, current_soc):
             return current_target
 
         solar_cloud = build_hourly_solar(raw_solar, hourly, db)
-        solar_rad = build_hourly_solar_radiation(raw_solar, hourly)
+        sw_eff_map = get_sw_efficiency_map(db)
+        solar_rad = build_hourly_solar_radiation(raw_solar, hourly, sw_eff_map)
 
         if solar_rad and sum(solar_rad.values()) > 0:
             hourly_solar_map = solar_rad

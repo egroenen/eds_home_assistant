@@ -8,6 +8,7 @@ from .db import get_param, set_param
 from .models import (
     build_hourly_solar, build_hourly_solar_radiation,
     build_hourly_consumption, get_seasonal_consumption,
+    get_sw_efficiency_map,
     get_temp_factor, get_day_factor, simulate_battery_hourly,
 )
 from .metocean import get_metocean_hourly
@@ -68,7 +69,8 @@ def track_solar_models(ha, db, day, hour, actual_pv_w, battery_soc, load_power_w
             return
 
         solar_cloud = build_hourly_solar(raw_solar, hourly, db)
-        solar_rad = build_hourly_solar_radiation(raw_solar, hourly)
+        sw_eff_map = get_sw_efficiency_map(db)
+        solar_rad = build_hourly_solar_radiation(raw_solar, hourly, sw_eff_map)
 
         cloud_kwh = solar_cloud.get(hour, 0)
         rad_kwh = (solar_rad or {}).get(hour, 0)

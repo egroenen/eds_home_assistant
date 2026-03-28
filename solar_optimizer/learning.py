@@ -89,6 +89,74 @@ def record_outcome(ha, db):
     update_learning(db)
 
 
+def update_sw_efficiency(db):
+    """Learn per-hour shortwave-to-production efficiency from recent data.
+
+    Because panels face different directions, the relationship between
+    shortwave radiation and production varies by time of day (e.g., morning
+    sun hits east-facing panels harder, afternoon favours west-facing).
+
+    For each hour, calculates the median ratio of actual_pv_W / shortwave_wm2
+    from recent forecast_tracking data, then blends into the stored per-hour
+    efficiency parameter.  Only uses readings with meaningful radiation
+    (>50 W/m²) and production (>200W) to avoid noisy low-light data.
+    """
+    rows = db.execute("""
+        SELECT hour, shortwave_wm2, actual_pv_wh
+        FROM forecast_tracking
+        WHERE shortwave_wm2 > 50
+          AND actual_pv_wh > 200
+        ORDER BY date DESC, hour DESC
+        LIMIT 200
+    """).fetchall()
+
+    if len(rows) < 3:
+        log.info(f"Not enough SW data for efficiency learning (have {len(rows)}, need 3+)")
+        return
+
+    # Group ratios by hour
+    by_hour = {}
+    for r in rows:
+        h = r["hour"]
+        ratio = r["actual_pv_wh"] / r["shortwave_wm2"]
+        by_hour.setdefault(h, []).append(ratio)
+
+    updated = []
+    for hour, ratios in sorted(by_hour.items()):
+        if len(ratios) < 2:
+            continue
+
+        # Median resists outliers from cloud transitions
+        ratios.sort()
+        n = len(ratios)
+        if n % 2 == 0:
+            median_ratio = (ratios[n // 2 - 1] + ratios[n // 2]) / 2
+        else:
+            median_ratio = ratios[n // 2]
+
+        # Convert W/(W/m²) to kWh/(W/m²)
+        new_eff = max(0.005, min(0.035, round(median_ratio / 1000.0, 4)))
+
+        param_key = f"sw_efficiency_{hour}"
+        current = get_param(db, param_key)
+        if current is None:
+            current = 0.018
+
+        blended = current + 0.30 * (new_eff - current)
+        blended = round(blended, 4)
+
+        if abs(blended - current) > 0.0002:
+            set_param(db, param_key, blended)
+            updated.append(f"h{hour}:{current:.4f}->{blended:.4f}")
+
+    if updated:
+        log.info(f"Learning: sw_efficiency updated {len(updated)} hours: "
+                 f"{', '.join(updated)}")
+    else:
+        log.info(f"Learning: sw_efficiency unchanged across all hours "
+                 f"(n={len(rows)} samples, {len(by_hour)} hours)")
+
+
 def update_model_preference(db):
     """Compare both solar models' accuracy over recent days and update preference."""
     rows = db.execute("""
@@ -307,3 +375,6 @@ def update_learning(db):
 
     # --- Adjustment 6: Solar model preference ---
     update_model_preference(db)
+
+    # --- Adjustment 7: Shortwave efficiency factor ---
+    update_sw_efficiency(db)

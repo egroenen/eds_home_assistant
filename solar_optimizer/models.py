@@ -37,13 +37,16 @@ def build_hourly_solar(raw_solar, hourly_forecast, db):
     return result
 
 
-def build_hourly_solar_radiation(raw_solar, hourly_forecast):
+def build_hourly_solar_radiation(raw_solar, hourly_forecast, sw_efficiency_by_hour=None):
     """Build hourly solar production dict using shortwave radiation (Model B).
 
-    Uses the relative shortwave radiation intensity per hour to distribute
-    the Forecast.Solar daily total across hours. This directly captures
-    atmospheric effects (clouds, aerosols, humidity) rather than inferring
-    from cloud percentage.
+    If sw_efficiency_by_hour is provided (dict of hour -> kWh per W/m²),
+    converts shortwave radiation directly to production using the per-hour
+    learned factor.  This accounts for panels facing different directions
+    producing more or less at different times of day.
+
+    Otherwise falls back to proportionally distributing the Forecast.Solar
+    daily total across hours by relative shortwave intensity.
 
     Returns None if shortwave data is not available.
     """
@@ -57,12 +60,30 @@ def build_hourly_solar_radiation(raw_solar, hourly_forecast):
     if not sw_by_hour or sum(sw_by_hour.values()) <= 0:
         return None
 
-    total_sw = sum(sw_by_hour.values())
-    result = {}
-    for hour, sw in sw_by_hour.items():
-        result[hour] = raw_solar * (sw / total_sw)
+    if sw_efficiency_by_hour:
+        # Direct conversion per hour: kWh = sw_wm2 × hour-specific efficiency
+        result = {}
+        for hour, sw in sw_by_hour.items():
+            eff = sw_efficiency_by_hour.get(hour, 0)
+            result[hour] = sw * eff if eff > 0 else 0
+        if sum(result.values()) <= 0:
+            # Fall through to proportional if all efficiencies are zero
+            total_sw = sum(sw_by_hour.values())
+            result = {hour: raw_solar * (sw / total_sw) for hour, sw in sw_by_hour.items()}
+    else:
+        # Fallback: distribute Forecast.Solar total proportionally
+        total_sw = sum(sw_by_hour.values())
+        result = {hour: raw_solar * (sw / total_sw) for hour, sw in sw_by_hour.items()}
 
     return result
+
+
+def get_sw_efficiency_map(db):
+    """Load per-hour shortwave efficiency values from learning params."""
+    return {
+        hour: get_param(db, f"sw_efficiency_{hour}") or 0.018
+        for hour in HOURLY_SOLAR_WEIGHT
+    }
 
 
 def build_hourly_consumption(daily_consumption, seasonal_factor, temp_factor, day_factor=1.0):

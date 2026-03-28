@@ -28,11 +28,11 @@ from . import config
 from .config import SCRIPT_DIR, DEFAULT_PARAMS, SLOT_TIMES, SLOT_POWERS, SLOT_ENABLES
 from .ha_api import HomeAssistantAPI
 from .db import get_db, get_param, set_param
-from .planner import calculate_plan, make_failsafe_plan
+from .planner import calculate_plan, make_failsafe_plan, is_overnight_charging_window
 from .registers import write_tou_config, store_plan
 from .polling import poll_snapshot
 from .learning import record_outcome, backup_db
-from .dashboard import write_dashboard_status, show_status, show_history
+from .dashboard import write_dashboard_status, write_history_status, show_status, show_history
 
 log = logging.getLogger("solar_optimizer")
 
@@ -90,10 +90,17 @@ def main():
     try:
         if mode == "optimize":
             plan = calculate_plan(ha, db)
-            success = write_tou_config(ha, plan)
             store_plan(db, plan)
+            if is_overnight_charging_window():
+                log.info("Overnight charging in progress — plan saved to DB, "
+                         "skipping full register write (poll will pick up new target)")
+                print(f"Optimization complete for {plan['date']} "
+                      f"(registers deferred — overnight charging active):")
+                success = True
+            else:
+                success = write_tou_config(ha, plan)
+                print(f"Optimization complete for {plan['date']}:")
             write_dashboard_status(ha, db)
-            print(f"Optimization complete for {plan['date']}:")
             print(f"  Overnight SOC target: {plan['overnight_soc_target']}%")
             print(f"  Solar forecast: {plan['solar_forecast_kwh']:.1f} kWh "
                   f"(adjusted: {plan['adjusted_solar_kwh']:.1f} kWh)")
@@ -124,6 +131,7 @@ def main():
             backup_db()
             record_outcome(ha, db)
             write_dashboard_status(ha, db)
+            write_history_status(db)
 
         elif mode == "poll":
             poll_snapshot(ha, db)
@@ -167,8 +175,9 @@ def main():
             log.warning("Attempting failsafe write...")
             try:
                 plan = make_failsafe_plan(f"error: {e}")
-                write_tou_config(ha, plan)
                 store_plan(db, plan)
+                if not is_overnight_charging_window():
+                    write_tou_config(ha, plan)
             except Exception as e2:
                 log.critical(f"Failsafe also failed: {e2}")
         sys.exit(1)
