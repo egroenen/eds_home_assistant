@@ -1,6 +1,7 @@
 """Self-learning parameter adjustment and outcome recording."""
 
 import logging
+import math
 import sqlite3
 from datetime import date, datetime
 
@@ -100,6 +101,12 @@ def update_sw_efficiency(db):
     from recent forecast_tracking data, then blends into the stored per-hour
     efficiency parameter.  Only uses readings with meaningful radiation
     (>50 W/m²) and production (>200W) to avoid noisy low-light data.
+
+    The learning rate is adaptive: it decays exponentially with the size of the
+    proposed change relative to the current value.  This means genuine slow
+    drift in panel efficiency is tracked at full speed (~30%), while large
+    one-off deviations (e.g., 30 min of cloud cover distorting an hour's ratio)
+    are heavily dampened (~3-7%).  Formula: rate = 0.30 * exp(-3 * |delta/current|).
     """
     rows = db.execute("""
         SELECT hour, shortwave_wm2, actual_pv_wh
@@ -142,7 +149,12 @@ def update_sw_efficiency(db):
         if current is None:
             current = 0.018
 
-        blended = current + 0.30 * (new_eff - current)
+        # Adaptive learning rate: small corrections apply faster, large
+        # swings (likely cloud transients) are dampened.  The rate decays
+        # exponentially with the relative size of the change.
+        delta = abs(new_eff - current) / current if current > 0 else 0
+        rate = 0.30 * math.exp(-3.0 * delta)  # ~30% for tiny, ~7% at 40% swing
+        blended = current + rate * (new_eff - current)
         blended = round(blended, 4)
 
         if abs(blended - current) > 0.0002:
