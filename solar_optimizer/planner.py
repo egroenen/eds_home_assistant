@@ -180,9 +180,8 @@ def calculate_plan(ha, db):
              f"deficit-based={soc_from_deficit:.0f}%, "
              f"profile={sim['hourly_soc']}")
 
-    min_soc = get_param(db, "min_overnight_soc")
     max_soc = get_param(db, "max_overnight_soc")
-    overnight_soc = max(min_soc, min(max_soc, candidate_soc))
+    overnight_soc = max(reserve_target, min(max_soc, candidate_soc))
     overnight_soc = int(round(overnight_soc / 5) * 5)
 
     log.info(f"SOC target: sim-optimal={candidate_soc}%, "

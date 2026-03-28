@@ -182,9 +182,8 @@ def _maybe_revise_target(ha, db, today, current_target, current_soc):
         revised = int(((hi + 4) // 5) * 5)
         sim = simulate_battery_hourly(revised, hourly_solar_map, hourly_consumption_map)
 
-        min_soc = get_param(db, "min_overnight_soc")
         max_soc = get_param(db, "max_overnight_soc")
-        revised = max(min_soc, min(max_soc, revised))
+        revised = max(reserve_target, min(max_soc, revised))
         revised = int(round(revised / 5) * 5)
 
         cloud_total = sum(solar_cloud.values())

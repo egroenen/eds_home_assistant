@@ -123,6 +123,8 @@ Hour-by-hour simulation through peak hours (7am-9pm) using:
 - `HOURLY_CONSUMPTION_WEIGHT` — double-hump (morning + evening peaks)
 - Temperature-based consumption factor (4 bands: cold/cool/mild/warm)
 - Catches intra-day timing issues (e.g., cloudy morning draining battery before sunny afternoon)
+- Binary search finds minimum starting SOC that keeps battery above `reserve_target` (20% = BATTERY_RESERVE_PCT + safety_margin) all day
+- Daytime floor uses `reserve_target` (20%), NOT `OUTAGE_RESERVE_PCT` (30%) — the outage reserve only applies to overnight slots
 
 ### Dashboard
 - **Summary card** on Home dashboard — plan vs actuals table with correction factors

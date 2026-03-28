@@ -96,7 +96,7 @@ Hour-by-hour simulation through peak hours (7am--9pm) using:
 - Temperature-based consumption factor (4 bands: cold/cool/mild/warm)
 - Weekend/weekday adjustment factor
 
-The simulation catches intra-day timing issues (e.g., cloudy morning draining the battery before a sunny afternoon) that a simple daily energy balance would miss.
+The simulation catches intra-day timing issues (e.g., cloudy morning draining the battery before a sunny afternoon) that a simple daily energy balance would miss. A binary search finds the minimum starting SOC that keeps the battery above `reserve_target` (20% = BATTERY_RESERVE_PCT + safety_margin) throughout peak hours. The daytime floor uses `reserve_target` (20%), not the overnight outage reserve (30%), which only applies to overnight TOU slots.
 
 ### Overnight Charging Strategy
 
