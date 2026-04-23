@@ -6,3 +6,4 @@ secrets.yaml
 .venv/
 .sfdx/
 __pycache__/
+solar_optimizer_status.json

@@ -159,18 +159,15 @@ def write_dashboard_status(ha, db, plan=None):
                 frozen = json.loads(frozen_row["frozen_detail"])
 
         if frozen:
-            # Use frozen forecast, but update actuals from hourly_log + forecast_tracking
-            actual_soc_rows = db.execute(
-                "SELECT hour, battery_soc FROM hourly_log WHERE date=? ORDER BY hour",
+            # Use frozen forecast, but update actuals from hourly_log
+            log_rows = db.execute(
+                "SELECT hour, battery_soc, load_consumption_kwh, pv_production_kwh "
+                "FROM hourly_log WHERE date=? ORDER BY hour",
                 (plan_date,)
             ).fetchall()
-            actual_soc_by_hour = {r["hour"]: r["battery_soc"] for r in actual_soc_rows}
-
-            actual_pv_rows = db.execute(
-                "SELECT hour, actual_pv_wh FROM forecast_tracking WHERE date=? ORDER BY hour",
-                (plan_date,)
-            ).fetchall()
-            actual_pv_by_hour = {r["hour"]: r["actual_pv_wh"] for r in actual_pv_rows}
+            actual_soc_by_hour = {r["hour"]: r["battery_soc"] for r in log_rows}
+            cons_counter_by_hour = {r["hour"]: r["load_consumption_kwh"] for r in log_rows}
+            pv_counter_by_hour = {r["hour"]: r["pv_production_kwh"] for r in log_rows}
 
             for h_entry in frozen["hours"]:
                 h = h_entry["hour"]
@@ -181,8 +178,13 @@ def write_dashboard_status(ha, db, plan=None):
                     h_entry["soc_diff"] = round(actual_soc - forecast_soc, 1)
                 else:
                     h_entry["soc_diff"] = None
-                actual_pv = actual_pv_by_hour.get(h)
-                h_entry["actual_pv_kwh"] = round(actual_pv / 1000, 2) if actual_pv is not None else None
+                # Actual kWh = delta between this hour's counter and next hour's
+                cur_pv = pv_counter_by_hour.get(h)
+                next_pv = pv_counter_by_hour.get(h + 1)
+                h_entry["actual_pv_kwh"] = round(next_pv - cur_pv, 2) if (cur_pv is not None and next_pv is not None) else None
+                cur_cons = cons_counter_by_hour.get(h)
+                next_cons = cons_counter_by_hour.get(h + 1)
+                h_entry["actual_consumption_kwh"] = round(next_cons - cur_cons, 2) if (cur_cons is not None and next_cons is not None) else None
 
             status["detail"] = frozen
         else:
@@ -215,17 +217,14 @@ def write_dashboard_status(ha, db, plan=None):
                 soc_target = p.get("overnight_soc_target", 70) if p else 70
                 sim = simulate_battery_hourly(soc_target, active_solar, hourly_consumption_map)
 
-                actual_soc_rows = db.execute(
-                    "SELECT hour, battery_soc FROM hourly_log WHERE date=? ORDER BY hour",
+                log_rows = db.execute(
+                    "SELECT hour, battery_soc, load_consumption_kwh, pv_production_kwh "
+                    "FROM hourly_log WHERE date=? ORDER BY hour",
                     (plan_date,)
                 ).fetchall()
-                actual_soc_by_hour = {r["hour"]: r["battery_soc"] for r in actual_soc_rows}
-
-                actual_pv_rows = db.execute(
-                    "SELECT hour, actual_pv_wh FROM forecast_tracking WHERE date=? ORDER BY hour",
-                    (plan_date,)
-                ).fetchall()
-                actual_pv_by_hour = {r["hour"]: r["actual_pv_wh"] for r in actual_pv_rows}
+                actual_soc_by_hour = {r["hour"]: r["battery_soc"] for r in log_rows}
+                cons_counter_by_hour = {r["hour"]: r["load_consumption_kwh"] for r in log_rows}
+                pv_counter_by_hour = {r["hour"]: r["pv_production_kwh"] for r in log_rows}
 
                 sim_soc_map = dict(sim["hourly_soc"])
                 detail_hours = []
@@ -233,10 +232,15 @@ def write_dashboard_status(ha, db, plan=None):
                     h = hfc["hour"]
                     forecast_soc = sim_soc_map.get(h)
                     actual_soc = actual_soc_by_hour.get(h)
-                    actual_pv = actual_pv_by_hour.get(h)
                     diff = None
                     if forecast_soc is not None and actual_soc is not None:
                         diff = round(actual_soc - forecast_soc, 1)
+                    cur_pv = pv_counter_by_hour.get(h)
+                    next_pv = pv_counter_by_hour.get(h + 1)
+                    actual_pv_kwh = round(next_pv - cur_pv, 2) if (cur_pv is not None and next_pv is not None) else None
+                    cur_cons = cons_counter_by_hour.get(h)
+                    next_cons = cons_counter_by_hour.get(h + 1)
+                    actual_cons_kwh = round(next_cons - cur_cons, 2) if (cur_cons is not None and next_cons is not None) else None
                     detail_hours.append({
                         "hour": h,
                         "condition": hfc["condition"],
@@ -245,8 +249,9 @@ def write_dashboard_status(ha, db, plan=None):
                         "sw_wm2": hfc.get("shortwave_wm2"),
                         "solar_cloud": round(solar_cloud.get(h, 0), 2),
                         "solar_rad": round((solar_rad or {}).get(h, 0), 2),
-                        "actual_pv_kwh": round(actual_pv / 1000, 2) if actual_pv is not None else None,
+                        "actual_pv_kwh": actual_pv_kwh,
                         "consumption": round(hourly_consumption_map.get(h, 0), 2),
+                        "actual_consumption_kwh": actual_cons_kwh,
                         "battery_soc": forecast_soc,
                         "actual_soc": actual_soc,
                         "soc_diff": diff,

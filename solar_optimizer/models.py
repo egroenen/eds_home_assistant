@@ -123,11 +123,14 @@ def get_day_factor(db, target_date):
 def simulate_battery_hourly(starting_soc_pct, hourly_solar, hourly_consumption):
     """Simulate battery SOC hour-by-hour through peak hours.
 
+    Each (hour, soc_pct) in hourly_soc represents the SOC at the START of
+    that hour (before solar/consumption), matching the :00 poll reading.
+
     Returns dict with:
         min_soc: lowest SOC reached (%)
         min_soc_hour: hour when minimum occurred
         shortfall_kwh: max energy below reserve (0 if never breached)
-        hourly_soc: list of (hour, soc_pct) tuples
+        hourly_soc: list of (hour, soc_pct) tuples — SOC at start of hour
     """
     soc_kwh = (starting_soc_pct / 100.0) * BATTERY_CAPACITY_KWH
     reserve_kwh = (BATTERY_RESERVE_PCT / 100.0) * BATTERY_CAPACITY_KWH
@@ -138,14 +141,15 @@ def simulate_battery_hourly(starting_soc_pct, hourly_solar, hourly_consumption):
     hourly_soc = []
 
     for hour in range(PEAK_START_HOUR, PEAK_END_HOUR):
+        # Record SOC at the start of the hour (before energy flow)
+        soc_pct = (soc_kwh / BATTERY_CAPACITY_KWH) * 100.0
+        hourly_soc.append((hour, round(soc_pct, 1)))
+
         solar = hourly_solar.get(hour, 0.0)
         consumption = hourly_consumption.get(hour, 0.0)
 
         soc_kwh += solar - consumption
         soc_kwh = max(0.0, min(BATTERY_CAPACITY_KWH, soc_kwh))
-
-        soc_pct = (soc_kwh / BATTERY_CAPACITY_KWH) * 100.0
-        hourly_soc.append((hour, round(soc_pct, 1)))
 
         if soc_kwh < min_soc_kwh:
             min_soc_kwh = soc_kwh

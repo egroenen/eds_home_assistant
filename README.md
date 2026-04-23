@@ -72,7 +72,7 @@ The system runs as a Python package on the HA VM, invoked by HA automations at s
 | `models.py` | Dual solar forecast models, hourly consumption distribution, battery simulation |
 | `planner.py` | Core optimizer: evaluates charging scenarios, picks SOC target, generates TOU slot config |
 | `registers.py` | Encodes and writes TOU time/power/SOC/enable registers to Deye inverter via Modbus |
-| `charging.py` | Real-time overnight charging adjustment -- shifts Slot 2 start and scales power to hit SOC target by 06:30 |
+| `charging.py` | Real-time overnight charging adjustment -- shifts Slot 2 start and scales power to hit SOC target by 06:59 |
 | `polling.py` | Hourly snapshot recording (SOC, grid, PV, load) and forecast-vs-actual tracking |
 | `learning.py` | Nightly learning cycle: weather corrections, consumption patterns, temperature factors, SW efficiency |
 | `dashboard.py` | Writes JSON status for HA dashboard cards and CLI `status`/`history` display |
@@ -86,7 +86,7 @@ Both models run in parallel with accuracy tracked hourly in the `forecast_tracki
 
 ### Shortwave Efficiency Learning
 
-The per-hour SW efficiency is learned nightly from the median ratio of actual PV output to forecast shortwave radiation. An adaptive learning rate resists large swings caused by transient cloud cover: small corrections (real efficiency drift) apply at up to 30%, while large deviations (cloud transients) are exponentially dampened down to ~3%. This prevents a single cloudy hour from distorting the learned efficiency.
+The per-hour SW efficiency is learned nightly from the median ratio of actual PV output to forecast shortwave radiation. Zero-production hours are included when meaningful radiation is present (>50 W/m²), allowing shoulder periods (panels shaded despite ambient radiation) to learn an efficiency near zero. An adaptive learning rate resists large swings caused by transient cloud cover: small corrections (real efficiency drift) apply at up to 30%, while large deviations (cloud transients) are exponentially dampened down to ~3%. This prevents a single cloudy hour from distorting the learned efficiency.
 
 ### Battery Simulation
 
@@ -98,10 +98,12 @@ Hour-by-hour simulation through peak hours (7am--9pm) using:
 
 The simulation catches intra-day timing issues (e.g., cloudy morning draining the battery before a sunny afternoon) that a simple daily energy balance would miss. A binary search finds the minimum starting SOC that keeps the battery above `reserve_target` (20% = BATTERY_RESERVE_PCT + safety_margin) throughout peak hours. The daytime floor uses `reserve_target` (20%), not the overnight outage reserve (30%), which only applies to overnight TOU slots.
 
+Simulated `hourly_soc` values represent the SOC at the **start** of each hour (before that hour's energy flow), matching the :00 poll readings for accurate forecast-vs-actual comparison on the dashboard.
+
 ### Overnight Charging Strategy
 
 - **Never charge before midnight** -- Slot 6 (21:00--00:00) held at reserve SOC with grid charge disabled
-- **Deferred charging** -- Slot 1 (00:00--04:00) at reserve; hourly polling dynamically shifts Slot 2 start time so the battery reaches its target SOC by 06:30
+- **Deferred charging** -- Slot 1 (00:00--04:00) at reserve; hourly polling dynamically shifts Slot 2 start time so the battery reaches its target SOC by 06:59 (aligned with the 07:00 hourly poll)
 - **Power scaling** -- if running behind schedule, charge power ramps up to 10 kW
 
 ### Forecast Freezing

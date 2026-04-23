@@ -100,7 +100,9 @@ def update_sw_efficiency(db):
     For each hour, calculates the median ratio of actual_pv_W / shortwave_wm2
     from recent forecast_tracking data, then blends into the stored per-hour
     efficiency parameter.  Only uses readings with meaningful radiation
-    (>50 W/m²) and production (>200W) to avoid noisy low-light data.
+    (>50 W/m²) to avoid noisy low-light data.  Zero-production hours ARE
+    included so that shoulder periods (panels shaded despite ambient radiation)
+    learn an efficiency near zero.
 
     The learning rate is adaptive: it decays exponentially with the size of the
     proposed change relative to the current value.  This means genuine slow
@@ -112,7 +114,7 @@ def update_sw_efficiency(db):
         SELECT hour, shortwave_wm2, actual_pv_wh
         FROM forecast_tracking
         WHERE shortwave_wm2 > 50
-          AND actual_pv_wh > 200
+          AND actual_pv_wh IS NOT NULL
         ORDER BY date DESC, hour DESC
         LIMIT 200
     """).fetchall()
@@ -142,7 +144,7 @@ def update_sw_efficiency(db):
             median_ratio = ratios[n // 2]
 
         # Convert W/(W/m²) to kWh/(W/m²)
-        new_eff = max(0.005, min(0.035, round(median_ratio / 1000.0, 4)))
+        new_eff = max(0.0, min(0.035, round(median_ratio / 1000.0, 4)))
 
         param_key = f"sw_efficiency_{hour}"
         current = get_param(db, param_key)

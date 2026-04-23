@@ -23,9 +23,9 @@ log = logging.getLogger("solar_optimizer")
 
 
 def adjust_overnight_charging(ha, db, now, current_soc):
-    """Dynamically adjust charge start time and power to hit target by 06:30.
+    """Dynamically adjust charge start time and power to hit target by 06:59.
 
-    Called every hour by the poll cron. Only acts during 00:00-06:30.
+    Called every hour by the poll cron. Only acts during 00:00-06:59.
     Writes Slot 1/2 time, SOC, and power registers to delay charging as
     late as possible while still reaching the target SOC by the deadline.
     """

@@ -99,7 +99,7 @@ Self-learning battery charging optimizer for Deye hybrid inverter (15kWh battery
 
 ### Charging Strategy
 - **Never charge before midnight** — Slot 6 (21:00-00:00) at reserve, grid charge disabled
-- **Defer charging** — Slot 1 (00:00-04:00) at reserve; hourly poll dynamically shifts Slot 2 start time so battery reaches target SOC by 06:30am
+- **Defer charging** — Slot 1 (00:00-04:00) at reserve; hourly poll dynamically shifts Slot 2 start time so battery reaches target SOC by 06:59 (aligned with 07:00 hourly poll reading)
 - **Power scaling** — poll can increase charge power up to 10kW if running late
 
 ### Weather Forecasts
@@ -125,6 +125,7 @@ Hour-by-hour simulation through peak hours (7am-9pm) using:
 - Catches intra-day timing issues (e.g., cloudy morning draining battery before sunny afternoon)
 - Binary search finds minimum starting SOC that keeps battery above `reserve_target` (20% = BATTERY_RESERVE_PCT + safety_margin) all day
 - Daytime floor uses `reserve_target` (20%), NOT `OUTAGE_RESERVE_PCT` (30%) — the outage reserve only applies to overnight slots
+- `hourly_soc` records SOC at the **start** of each hour (before energy flow), aligned with the :00 poll readings
 
 ### Dashboard
 - **Summary card** on Home dashboard — plan vs actuals table with correction factors

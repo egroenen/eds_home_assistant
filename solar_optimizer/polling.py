@@ -30,14 +30,18 @@ def poll_snapshot(ha, db):
     load_power = ha.get_sensor_float(SENSORS["load_power"])
     grid_bought = ha.get_sensor_float(SENSORS["daily_grid_bought"])
     grid_sold = ha.get_sensor_float(SENSORS["daily_grid_sold"])
+    load_consumption = ha.get_sensor_float(SENSORS["daily_consumption"])
+    pv_production = ha.get_sensor_float(SENSORS["daily_production"])
 
     db.execute("""
         INSERT OR REPLACE INTO hourly_log
         (timestamp, date, hour, battery_soc, grid_power_w, pv_power_w,
-         load_power_w, grid_bought_kwh, grid_sold_kwh)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         load_power_w, grid_bought_kwh, grid_sold_kwh,
+         load_consumption_kwh, pv_production_kwh)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (ts, day, hour, battery_soc, grid_power, pv_power,
-          load_power, grid_bought, grid_sold))
+          load_power, grid_bought, grid_sold,
+          load_consumption, pv_production))
     db.commit()
 
     log.info(f"Poll: SOC={battery_soc}%, grid={grid_power}W, "

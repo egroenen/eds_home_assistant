@@ -23,7 +23,7 @@ log = logging.getLogger("solar_optimizer")
 def get_plan_date():
     """Determine which date we are planning for.
 
-    Before the charge deadline (06:30), we are still in the overnight window
+    Before the charge deadline (06:59), we are still in the overnight window
     charging for today, so plan for today.  After that, plan for tomorrow.
     """
     now = datetime.now()
@@ -35,7 +35,7 @@ def get_plan_date():
 
 
 def is_overnight_charging_window():
-    """Return True if we are in the overnight charging window (00:00-06:30)."""
+    """Return True if we are in the overnight charging window (00:00-06:59)."""
     now = datetime.now()
     deadline_minutes = CHARGE_DEADLINE_HOUR * 60 + CHARGE_DEADLINE_MIN
     now_minutes = now.hour * 60 + now.minute

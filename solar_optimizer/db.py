@@ -53,15 +53,17 @@ def init_db(db):
         );
 
         CREATE TABLE IF NOT EXISTS hourly_log (
-            timestamp       TEXT PRIMARY KEY,
-            date            TEXT NOT NULL,
-            hour            INTEGER NOT NULL,
-            battery_soc     REAL,
-            grid_power_w    REAL,
-            pv_power_w      REAL,
-            load_power_w    REAL,
-            grid_bought_kwh REAL,
-            grid_sold_kwh   REAL
+            timestamp            TEXT PRIMARY KEY,
+            date                 TEXT NOT NULL,
+            hour                 INTEGER NOT NULL,
+            battery_soc          REAL,
+            grid_power_w         REAL,
+            pv_power_w           REAL,
+            load_power_w         REAL,
+            grid_bought_kwh      REAL,
+            grid_sold_kwh        REAL,
+            load_consumption_kwh REAL,
+            pv_production_kwh    REAL
         );
 
         CREATE TABLE IF NOT EXISTS learning_params (
@@ -111,6 +113,14 @@ def init_db(db):
             db.execute(f"SELECT {col} FROM forecast_tracking LIMIT 1")
         except sqlite3.OperationalError:
             db.execute(f"ALTER TABLE forecast_tracking ADD COLUMN {col} {coltype}")
+            db.commit()
+
+    # Add cumulative counter columns to hourly_log if missing (migration)
+    for col in ["load_consumption_kwh", "pv_production_kwh"]:
+        try:
+            db.execute(f"SELECT {col} FROM hourly_log LIMIT 1")
+        except sqlite3.OperationalError:
+            db.execute(f"ALTER TABLE hourly_log ADD COLUMN {col} REAL")
             db.commit()
 
     # Add frozen_detail column to daily_plan if missing (migration)

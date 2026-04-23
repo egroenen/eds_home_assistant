@@ -20,15 +20,16 @@ left_content = (
     _set_vars +
     "{% if d %}\n"
     "### Hourly Forecast ({{ d.plan_date }})\n\n"
-    "| Hr | Cond | Temp | Short<br>wave | Cloud | Rad | Prod | Con<br>sump | Forecast | Actual | +/- |\n"
+    "| Hr | Cond | Temp | Short<br>wave | Rad | Prod | Con<br>sump | Act<br>Cons | Forecast | Actual | +/- |\n"
     "|--:|:--|--:|--:|--:|--:|--:|--:|--:|--:|--:|\n"
     "{% for h in d.hours %}"
     "| {{ h.hour }} | {{ h.condition[:5] }} | "
     "{{ h.temp if h.temp else '-' }} | "
     "{{ h.sw_wm2 if h.sw_wm2 else '-' }} | "
-    "{{ h.solar_cloud }} | {{ h.solar_rad }} | "
+    "{{ h.solar_rad }} | "
     "{{ h.actual_pv_kwh if h.actual_pv_kwh is not none else '-' }} | "
     "{{ h.consumption }} | "
+    "{{ '%.2f' | format(h.actual_consumption_kwh) if h.actual_consumption_kwh is not none else '-' }} | "
     "{{ h.battery_soc if h.battery_soc is not none else '-' }}% | "
     "{{ h.actual_soc if h.actual_soc is not none else '-' }}{% if h.actual_soc is not none %}%{% endif %} | "
     "{% if h.soc_diff is not none %}"
@@ -64,7 +65,7 @@ left_content = (
     "A **30% outage reserve** is maintained overnight (Slots 1 and 6) as a safety "
     "net for power outages. The battery charges to 30% after 9pm via cheap off-peak "
     "grid, then the optimizer tops up to the **{{ plan.overnight_soc }}% target** "
-    "as late as possible before 6:30am to minimise time at high SOC.\n\n"
+    "as late as possible before 7am to minimise time at high SOC.\n\n"
     "The hour-by-hour battery simulation starts at **{{ plan.overnight_soc }}%** and "
     "tracks solar production against consumption through each peak hour. "
     "{% if d.sim_min_soc <= 15 %}"
@@ -146,15 +147,15 @@ right_content = (
     "| Updated | {{ updated }} |\n\n"
     # SW Efficiency table: shows learned efficiency (Eff), today's actual
     # efficiency (Actual = actual_pv_kwh / shortwave_wm2 from the detail hours),
-    # and the difference (Diff).  Actual is only shown for hours with meaningful
-    # radiation (>50 W/m²) and production (>0.2 kWh) to filter noise.
+    # and the difference (Diff).  Actual is shown for hours with meaningful
+    # radiation (>50 W/m²), including zero-production shoulder hours.
     # Uses Jinja2 namespace to accumulate the actual dict inside a for-loop.
     "### SW Efficiency (kWh/W/m²)\n\n"
     "{% if learn.sw_efficiency and d %}\n"
     "{% set eff = learn.sw_efficiency %}\n"
     "{% set ns = namespace(actual={}) %}\n"
     "{% for h in d.hours %}"
-    "{% if h.sw_wm2 and h.sw_wm2 > 50 and h.actual_pv_kwh is not none and h.actual_pv_kwh > 0.2 %}"
+    "{% if h.sw_wm2 and h.sw_wm2 > 50 and h.actual_pv_kwh is not none %}"
     "{% set ns.actual = dict(ns.actual, **{h.hour | string: h.actual_pv_kwh / h.sw_wm2}) %}"
     "{% endif %}"
     "{% endfor %}"

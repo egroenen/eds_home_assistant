@@ -23,8 +23,9 @@ PEAK_START_HOUR = 7   # 7am
 PEAK_END_HOUR = 21    # 9pm
 
 # Charge deadline — battery should reach target SOC by this time
+# Aligned to :59 so the 07:00 hourly poll reads the true charged SOC
 CHARGE_DEADLINE_HOUR = 6
-CHARGE_DEADLINE_MIN = 30
+CHARGE_DEADLINE_MIN = 59
 
 # Minimum overnight SOC for power outage safety (Slot 1 floor)
 OUTAGE_RESERVE_PCT = 30
