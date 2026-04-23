@@ -6,7 +6,7 @@ from .config import (
     HOURLY_SOLAR_WEIGHT, HOURLY_CONSUMPTION_WEIGHT,
     CONDITION_MAP, TEMP_BANDS, NZ_SEASONS, WEEKEND_DAYS,
     BATTERY_CAPACITY_KWH, BATTERY_RESERVE_PCT,
-    PEAK_START_HOUR, PEAK_END_HOUR,
+    PEAK_START_HOUR, PEAK_END_HOUR, SOLAR_LAST_HOUR,
 )
 from .db import get_param
 
@@ -37,7 +37,8 @@ def build_hourly_solar(raw_solar, hourly_forecast, db):
     return result
 
 
-def build_hourly_solar_radiation(raw_solar, hourly_forecast, sw_efficiency_by_hour=None):
+def build_hourly_solar_radiation(raw_solar, hourly_forecast, sw_efficiency_by_hour=None,
+                                 target_date=None):
     """Build hourly solar production dict using shortwave radiation (Model B).
 
     If sw_efficiency_by_hour is provided (dict of hour -> kWh per W/m²),
@@ -48,13 +49,26 @@ def build_hourly_solar_radiation(raw_solar, hourly_forecast, sw_efficiency_by_ho
     Otherwise falls back to proportionally distributing the Forecast.Solar
     daily total across hours by relative shortwave intensity.
 
+    Hours after SOLAR_LAST_HOUR for the target month are zeroed out because
+    MetOcean reports diffuse shortwave radiation past sunset that panels
+    cannot use.
+
     Returns None if shortwave data is not available.
     """
+    # Determine last production hour for this month
+    if target_date is None:
+        month = datetime.now().month
+    elif isinstance(target_date, str):
+        month = datetime.strptime(target_date, "%Y-%m-%d").month
+    else:
+        month = target_date.month
+    last_hour = SOLAR_LAST_HOUR.get(month, 20)
+
     sw_by_hour = {}
     for hfc in hourly_forecast:
         hour = hfc["hour"]
         sw = hfc.get("shortwave_wm2")
-        if sw is not None and hour in HOURLY_SOLAR_WEIGHT:
+        if sw is not None and hour in HOURLY_SOLAR_WEIGHT and hour <= last_hour:
             sw_by_hour[hour] = max(0, sw)
 
     if not sw_by_hour or sum(sw_by_hour.values()) <= 0:
@@ -80,10 +94,11 @@ def build_hourly_solar_radiation(raw_solar, hourly_forecast, sw_efficiency_by_ho
 
 def get_sw_efficiency_map(db):
     """Load per-hour shortwave efficiency values from learning params."""
-    return {
-        hour: get_param(db, f"sw_efficiency_{hour}") or 0.018
-        for hour in HOURLY_SOLAR_WEIGHT
-    }
+    result = {}
+    for hour in HOURLY_SOLAR_WEIGHT:
+        v = get_param(db, f"sw_efficiency_{hour}")
+        result[hour] = v if v is not None else 0.018
+    return result
 
 
 def build_hourly_consumption(daily_consumption, seasonal_factor, temp_factor, day_factor=1.0):

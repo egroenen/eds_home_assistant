@@ -97,11 +97,23 @@ HOURLY_SOLAR_WEIGHT = {
     19: 0.01, 20: 0.00,
 }
 
+# Last hour with meaningful solar production, by month.
+# Christchurch (-43.5°) sunset times shift ~3 hours between solstices.
+# MetOcean reports diffuse shortwave radiation well past sunset, but panels
+# produce nothing — so the radiation model must zero out post-sunset hours.
+# Values are conservative (last hour where any production is plausible).
+SOLAR_LAST_HOUR = {
+    1: 20, 2: 19, 3: 18, 4: 17, 5: 16, 6: 16,
+    7: 16, 8: 16, 9: 17, 10: 18, 11: 18, 12: 19,
+}
+
 # Hourly consumption weights (fraction of daily total per peak hour)
+# Derived from 13 days of actual hourly_log data (April 2026).
+# Flatter midday load, lighter morning/evening than original profile.
 HOURLY_CONSUMPTION_WEIGHT = {
-    7: 0.06, 8: 0.06, 9: 0.05, 10: 0.04, 11: 0.04, 12: 0.05,
-    13: 0.05, 14: 0.04, 15: 0.04, 16: 0.05, 17: 0.07, 18: 0.07,
-    19: 0.05, 20: 0.03,
+    7: 0.04, 8: 0.03, 9: 0.06, 10: 0.07, 11: 0.05, 12: 0.06,
+    13: 0.06, 14: 0.05, 15: 0.04, 16: 0.04, 17: 0.04, 18: 0.06,
+    19: 0.05, 20: 0.05,
 }
 
 # Weather condition normalization map

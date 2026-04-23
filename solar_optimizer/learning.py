@@ -105,10 +105,10 @@ def update_sw_efficiency(db):
     learn an efficiency near zero.
 
     The learning rate is adaptive: it decays exponentially with the size of the
-    proposed change relative to the current value.  This means genuine slow
-    drift in panel efficiency is tracked at full speed (~30%), while large
-    one-off deviations (e.g., 30 min of cloud cover distorting an hour's ratio)
-    are heavily dampened (~3-7%).  Formula: rate = 0.30 * exp(-3 * |delta/current|).
+    proposed change relative to the current value, with a floor of 10% to
+    guarantee convergence even when initialisation is far off.  Small drift
+    applies at ~30%, large deviations are dampened but always make progress.
+    Formula: rate = max(0.10, 0.30 * exp(-2 * |delta/current|)).
     """
     rows = db.execute("""
         SELECT hour, shortwave_wm2, actual_pv_wh
@@ -144,18 +144,18 @@ def update_sw_efficiency(db):
             median_ratio = ratios[n // 2]
 
         # Convert W/(W/m²) to kWh/(W/m²)
-        new_eff = max(0.0, min(0.035, round(median_ratio / 1000.0, 4)))
+        new_eff = max(0.0, min(0.08, round(median_ratio / 1000.0, 4)))
 
         param_key = f"sw_efficiency_{hour}"
         current = get_param(db, param_key)
         if current is None:
             current = 0.018
 
-        # Adaptive learning rate: small corrections apply faster, large
-        # swings (likely cloud transients) are dampened.  The rate decays
-        # exponentially with the relative size of the change.
+        # Adaptive learning rate: small corrections apply at full speed,
+        # large swings are dampened but still make progress.  A floor of
+        # 10% ensures convergence even when initialisation is far off.
         delta = abs(new_eff - current) / current if current > 0 else 0
-        rate = 0.30 * math.exp(-3.0 * delta)  # ~30% for tiny, ~7% at 40% swing
+        rate = max(0.10, 0.30 * math.exp(-2.0 * delta))
         blended = current + rate * (new_eff - current)
         blended = round(blended, 4)
 

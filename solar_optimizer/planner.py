@@ -96,7 +96,8 @@ def calculate_plan(ha, db):
     if hourly and len(hourly) >= 6:
         solar_cloud = build_hourly_solar(raw_solar, hourly, db)
         sw_eff_map = get_sw_efficiency_map(db)
-        solar_rad = build_hourly_solar_radiation(raw_solar, hourly, sw_eff_map)
+        solar_rad = build_hourly_solar_radiation(raw_solar, hourly, sw_eff_map,
+                                                       target_date=plan_date_str)
 
         if solar_rad and sum(solar_rad.values()) > 0:
             hourly_solar_map = solar_rad

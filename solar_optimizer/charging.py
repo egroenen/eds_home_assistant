@@ -145,7 +145,8 @@ def _maybe_revise_target(ha, db, today, current_target, current_soc):
 
         solar_cloud = build_hourly_solar(raw_solar, hourly, db)
         sw_eff_map = get_sw_efficiency_map(db)
-        solar_rad = build_hourly_solar_radiation(raw_solar, hourly, sw_eff_map)
+        solar_rad = build_hourly_solar_radiation(raw_solar, hourly, sw_eff_map,
+                                                       target_date=today)
 
         if solar_rad and sum(solar_rad.values()) > 0:
             hourly_solar_map = solar_rad

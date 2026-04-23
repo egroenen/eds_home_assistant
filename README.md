@@ -82,17 +82,17 @@ The system runs as a Python package on the HA VM, invoked by HA automations at s
 Both models run in parallel with accuracy tracked hourly in the `forecast_tracking` table. A learned `preferred_solar_model` parameter (0=cloud, 1=radiation, threshold 0.5) selects which one drives planning.
 
 - **Model A (cloud):** Applies per-hour weather condition and cloud-coverage corrections to Forecast.Solar's daily total. Each weather condition (sunny, partly cloudy, cloudy, rainy) has a learned correction factor.
-- **Model B (radiation):** Converts MetOcean shortwave radiation forecasts (W/m²) directly into production using per-hour learned efficiency factors (`sw_efficiency_7` through `sw_efficiency_20`). Each hour has its own factor because panels face different directions -- morning sun favours east-facing panels while afternoon sun favours west-facing.
+- **Model B (radiation):** Converts MetOcean shortwave radiation forecasts (W/m²) directly into production using per-hour learned efficiency factors (`sw_efficiency_7` through `sw_efficiency_20`). Each hour has its own factor because panels face different directions -- morning sun favours east-facing panels while afternoon sun favours west-facing. Hours past sunset are zeroed via `SOLAR_LAST_HOUR` (a monthly map in config), because MetOcean reports diffuse atmospheric shortwave radiation well past sunset that panels cannot convert.
 
 ### Shortwave Efficiency Learning
 
-The per-hour SW efficiency is learned nightly from the median ratio of actual PV output to forecast shortwave radiation. Zero-production hours are included when meaningful radiation is present (>50 W/m²), allowing shoulder periods (panels shaded despite ambient radiation) to learn an efficiency near zero. An adaptive learning rate resists large swings caused by transient cloud cover: small corrections (real efficiency drift) apply at up to 30%, while large deviations (cloud transients) are exponentially dampened down to ~3%. This prevents a single cloudy hour from distorting the learned efficiency.
+The per-hour SW efficiency is learned nightly from the median ratio of actual PV output to forecast shortwave radiation. Zero-production hours are included when meaningful radiation is present (>50 W/m²), allowing shoulder periods (panels shaded despite ambient radiation) to learn an efficiency near zero. An adaptive learning rate resists large swings: small corrections apply at ~30%, while large deviations are dampened with a 10% floor guaranteeing convergence even when initialisation is far off. Formula: `rate = max(0.10, 0.30 * exp(-2 * |delta/current|))`.
 
 ### Battery Simulation
 
 Hour-by-hour simulation through peak hours (7am--9pm) using:
 - Bell-curve solar weights centred around 1pm
-- Double-hump consumption weights (morning + evening peaks)
+- Consumption weights derived from observed hourly data (flatter midday load, lighter edges)
 - Temperature-based consumption factor (4 bands: cold/cool/mild/warm)
 - Weekend/weekday adjustment factor
 

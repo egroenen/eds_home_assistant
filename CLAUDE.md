@@ -115,12 +115,13 @@ Self-learning battery charging optimizer for Deye hybrid inverter (15kWh battery
 Both run in parallel, accuracy tracked hourly in `forecast_tracking` table:
 - **Model A (cloud)**: per-hour weather condition + cloud% correction × Forecast.Solar daily total
 - **Model B (radiation)**: shortwave radiation W/m² proportional distribution of Forecast.Solar total
+  - Post-sunset hours zeroed via `SOLAR_LAST_HOUR` monthly map — MetOcean reports diffuse SW radiation past sunset that panels cannot use
 - `preferred_solar_model` param learned over time (0=cloud, 1=radiation, threshold 0.5)
 
 ### Battery Simulation
 Hour-by-hour simulation through peak hours (7am-9pm) using:
 - `HOURLY_SOLAR_WEIGHT` — bell curve centered ~1pm
-- `HOURLY_CONSUMPTION_WEIGHT` — double-hump (morning + evening peaks)
+- `HOURLY_CONSUMPTION_WEIGHT` — derived from observed hourly data (flatter midday, lighter edges)
 - Temperature-based consumption factor (4 bands: cold/cool/mild/warm)
 - Catches intra-day timing issues (e.g., cloudy morning draining battery before sunny afternoon)
 - Binary search finds minimum starting SOC that keeps battery above `reserve_target` (20% = BATTERY_RESERVE_PCT + safety_margin) all day

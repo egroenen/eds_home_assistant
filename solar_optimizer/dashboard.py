@@ -134,7 +134,7 @@ def write_dashboard_status(ha, db, plan=None):
     sw_eff = {}
     for h in range(7, 21):
         v = get_param(db, f"sw_efficiency_{h}")
-        sw_eff[h] = round(v, 4) if v else 0.018
+        sw_eff[h] = round(v, 4) if v is not None else 0.018
     status["learning"]["sw_efficiency"] = sw_eff
     status["learning"]["active_model"] = "radiation"
 
@@ -203,7 +203,8 @@ def write_dashboard_status(ha, db, plan=None):
             if hourly and len(hourly) >= 6 and raw_solar and raw_solar > 0:
                 solar_cloud = build_hourly_solar(raw_solar, hourly, db)
                 sw_eff_map = get_sw_efficiency_map(db)
-                solar_rad = build_hourly_solar_radiation(raw_solar, hourly, sw_eff_map)
+                solar_rad = build_hourly_solar_radiation(raw_solar, hourly, sw_eff_map,
+                                                               target_date=plan_date)
 
                 daily_consumption = get_seasonal_consumption(db, plan_date)
                 season = get_season(plan_date)
