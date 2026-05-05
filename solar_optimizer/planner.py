@@ -6,16 +6,17 @@ from datetime import date, datetime, timedelta
 from .config import (
     SENSORS, CONDITION_MAP, FAILSAFE_OVERNIGHT_SOC,
     BATTERY_RESERVE_PCT, USABLE_CAPACITY_KWH, OUTAGE_RESERVE_PCT,
-    HOURLY_SOLAR_WEIGHT, CHARGE_DEADLINE_HOUR, CHARGE_DEADLINE_MIN,
+    CHARGE_DEADLINE_HOUR, CHARGE_DEADLINE_MIN,
 )
 from .db import get_param
 from .models import (
-    build_hourly_solar, build_hourly_solar_radiation,
     build_hourly_consumption, get_season, get_seasonal_consumption,
     get_day_factor, get_temp_factor, simulate_battery_hourly,
-    get_sw_efficiency_map,
+    get_daylight_solar_weights,
 )
+from .engines import build_engine_hourly_solar
 from .metocean import get_metocean_hourly
+from .profiles import get_active_engine_name, get_active_profile_name
 
 log = logging.getLogger("solar_optimizer")
 
@@ -92,21 +93,15 @@ def calculate_plan(ha, db):
     # Step 4: Build hourly solar and consumption profiles
     daily_consumption = get_seasonal_consumption(db, plan_date_str)
     season = get_season(plan_date_str)
+    engine_name = get_active_engine_name(db)
+    profile_name = get_active_profile_name(db)
 
     if hourly and len(hourly) >= 6:
-        solar_cloud = build_hourly_solar(raw_solar, hourly, db)
-        sw_eff_map = get_sw_efficiency_map(db)
-        solar_rad = build_hourly_solar_radiation(raw_solar, hourly, sw_eff_map,
-                                                       target_date=plan_date_str)
-
-        if solar_rad and sum(solar_rad.values()) > 0:
-            hourly_solar_map = solar_rad
-            active_model = "radiation"
-        else:
-            hourly_solar_map = solar_cloud
-            active_model = "cloud"
-
-        peak_solar = sum(hourly_solar_map.values())
+        solar_result = build_engine_hourly_solar(
+            raw_solar, hourly, db, plan_date_str, engine_name
+        )
+        hourly_solar_map = solar_result["hourly_solar"]
+        peak_solar = solar_result["active_total"]
         adjusted_solar = peak_solar
         correction_factor = adjusted_solar / raw_solar if raw_solar > 0 else 0
 
@@ -114,10 +109,10 @@ def calculate_plan(ha, db):
         if temps:
             temp_high = sum(temps) / len(temps)
 
-        cloud_total = sum(solar_cloud.values())
-        rad_total = sum(solar_rad.values()) if solar_rad else 0
+        cloud_total = solar_result["cloud_total"]
+        rad_total = solar_result["radiation_total"]
         hours_detail = [f"{h}:{hourly_solar_map.get(h, 0):.1f}" for h in sorted(hourly_solar_map)]
-        log.info(f"Solar forecast: {raw_solar:.1f} kWh, active={active_model}, "
+        log.info(f"Solar forecast: {raw_solar:.1f} kWh, active={engine_name}, "
                  f"cloud={cloud_total:.1f} kWh, radiation={rad_total:.1f} kWh "
                  f"[{', '.join(hours_detail)}]")
     else:
@@ -131,10 +126,11 @@ def calculate_plan(ha, db):
         adjusted_solar = raw_solar * correction_factor
         peak_solar = adjusted_solar * get_param(db, "peak_solar_ratio")
 
-        total_weight = sum(HOURLY_SOLAR_WEIGHT.values())
+        daylight_weights = get_daylight_solar_weights(plan_date_str)
+        total_weight = sum(daylight_weights.values())
         hourly_solar_map = {
             h: peak_solar * (w / total_weight)
-            for h, w in HOURLY_SOLAR_WEIGHT.items() if w > 0
+            for h, w in daylight_weights.items()
         }
         log.info(f"Solar forecast: {raw_solar:.1f} kWh, adjusted: {adjusted_solar:.1f} kWh "
                  f"(daily fallback, correction: {correction_factor:.2f})")
@@ -210,6 +206,8 @@ def calculate_plan(ha, db):
         "energy_deficit_kwh": energy_deficit,
         "correction_factor": correction_factor,
         "slot_socs": slot_socs,
+        "engine_name": engine_name,
+        "profile_name": profile_name,
     }
 
 

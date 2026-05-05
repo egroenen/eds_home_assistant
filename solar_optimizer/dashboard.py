@@ -7,12 +7,12 @@ from datetime import date, datetime, timedelta
 from .config import SENSORS, SCRIPT_DIR, PEAK_START_HOUR
 from .db import get_param
 from .models import (
-    build_hourly_solar, build_hourly_solar_radiation,
     build_hourly_consumption, get_season, get_seasonal_consumption,
     get_temp_factor, get_day_factor, simulate_battery_hourly,
-    get_sw_efficiency_map,
 )
+from .engines import build_engine_hourly_solar
 from .metocean import get_metocean_hourly
+from .profiles import get_active_engine_name, get_active_profile_name
 
 log = logging.getLogger("solar_optimizer")
 
@@ -129,6 +129,8 @@ def write_dashboard_status(ha, db, plan=None):
 
     pref = get_param(db, "preferred_solar_model") or 0.0
     status["learning"]["model_pref"] = round(pref, 2)
+    status["learning"]["active_engine"] = get_active_engine_name(db)
+    status["learning"]["active_profile"] = get_active_profile_name(db)
 
     # Per-hour shortwave efficiency
     sw_eff = {}
@@ -136,7 +138,7 @@ def write_dashboard_status(ha, db, plan=None):
         v = get_param(db, f"sw_efficiency_{h}")
         sw_eff[h] = round(v, 4) if v is not None else 0.018
     status["learning"]["sw_efficiency"] = sw_eff
-    status["learning"]["active_model"] = "radiation"
+    status["learning"]["active_model"] = get_active_engine_name(db)
 
     # Detailed hourly forecast for the detail view
     #
@@ -201,10 +203,12 @@ def write_dashboard_status(ha, db, plan=None):
                 hourly_source = "ha"
 
             if hourly and len(hourly) >= 6 and raw_solar and raw_solar > 0:
-                solar_cloud = build_hourly_solar(raw_solar, hourly, db)
-                sw_eff_map = get_sw_efficiency_map(db)
-                solar_rad = build_hourly_solar_radiation(raw_solar, hourly, sw_eff_map,
-                                                               target_date=plan_date)
+                engine_name = get_active_engine_name(db)
+                solar_result = build_engine_hourly_solar(
+                    raw_solar, hourly, db, plan_date, engine_name
+                )
+                solar_cloud = solar_result["cloud_hourly"]
+                solar_rad = solar_result["radiation_hourly"]
 
                 daily_consumption = get_seasonal_consumption(db, plan_date)
                 season = get_season(plan_date)
@@ -214,7 +218,7 @@ def write_dashboard_status(ha, db, plan=None):
                 day_factor = get_day_factor(db, plan_date)
                 hourly_consumption_map = build_hourly_consumption(daily_consumption, 1.0, temp_factor, day_factor)
 
-                active_solar = solar_rad if (solar_rad and sum(solar_rad.values()) > 0) else solar_cloud
+                active_solar = solar_result["hourly_solar"]
                 soc_target = p.get("overnight_soc_target", 70) if p else 70
                 sim = simulate_battery_hourly(soc_target, active_solar, hourly_consumption_map)
 
@@ -264,6 +268,7 @@ def write_dashboard_status(ha, db, plan=None):
                     "plan_date": plan_date,
                     "season": season,
                     "seasonal_avg": daily_consumption,
+                    "engine": engine_name,
                     "temp_factor": round(temp_factor, 2),
                     "day_factor": round(day_factor, 2),
                     "avg_temp": round(avg_temp, 1) if avg_temp else None,

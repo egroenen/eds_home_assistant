@@ -1,10 +1,11 @@
 """Configuration constants for the solar optimizer."""
 
+import os
 from pathlib import Path
 
 # SCRIPT_DIR is the project root (parent of this package directory)
 SCRIPT_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = SCRIPT_DIR / "solar_optimizer.db"
+DB_PATH = Path(os.environ.get("SOLAR_OPTIMIZER_DB_PATH", str(SCRIPT_DIR / "solar_optimizer.db")))
 ENV_PATH = SCRIPT_DIR / ".env"
 
 # MetOcean API (MetService) — primary weather source for NZ
@@ -17,6 +18,10 @@ METOCEAN_LON = 172.698
 BATTERY_CAPACITY_KWH = 15.0
 BATTERY_RESERVE_PCT = 10
 USABLE_CAPACITY_KWH = BATTERY_CAPACITY_KWH * (100 - BATTERY_RESERVE_PCT) / 100  # 13.5
+
+# Historical tuning score uses peak-period import as a direct money proxy.
+# Default value provided by the user on 2026-05-05.
+PEAK_VALUE_RATE = 0.32
 
 # Peak hours (inclusive)
 PEAK_START_HOUR = 7   # 7am
@@ -95,6 +100,17 @@ HOURLY_SOLAR_WEIGHT = {
     7: 0.02, 8: 0.05, 9: 0.08, 10: 0.10, 11: 0.12, 12: 0.13,
     13: 0.13, 14: 0.12, 15: 0.10, 16: 0.08, 17: 0.05, 18: 0.03,
     19: 0.01, 20: 0.00,
+}
+
+# First hour with meaningful solar production, by month.
+# In Christchurch the shoulder hours around winter sunrise are often still
+# effectively dark for the panels, even if the weather feed reports a daytime
+# condition or low ambient shortwave. These values intentionally skip those
+# pitch-black edge hours so the optimizer does not "find" solar before first
+# usable light.
+SOLAR_FIRST_HOUR = {
+    1: 7, 2: 7, 3: 7, 4: 8, 5: 8, 6: 8,
+    7: 8, 8: 8, 9: 7, 10: 7, 11: 7, 12: 7,
 }
 
 # Last hour with meaningful solar production, by month.

@@ -11,12 +11,12 @@ from .config import (
 )
 from .db import get_param, set_param
 from .models import (
-    build_hourly_solar, build_hourly_solar_radiation,
     build_hourly_consumption, get_seasonal_consumption,
     get_temp_factor, get_day_factor, simulate_battery_hourly,
-    get_sw_efficiency_map,
 )
+from .engines import build_engine_hourly_solar
 from .metocean import get_metocean_hourly
+from .profiles import get_active_engine_name
 from .registers import encode_time
 
 log = logging.getLogger("solar_optimizer")
@@ -143,17 +143,11 @@ def _maybe_revise_target(ha, db, today, current_target, current_soc):
             log.info("No hourly forecast available, keeping target")
             return current_target
 
-        solar_cloud = build_hourly_solar(raw_solar, hourly, db)
-        sw_eff_map = get_sw_efficiency_map(db)
-        solar_rad = build_hourly_solar_radiation(raw_solar, hourly, sw_eff_map,
-                                                       target_date=today)
-
-        if solar_rad and sum(solar_rad.values()) > 0:
-            hourly_solar_map = solar_rad
-            active_model = "radiation"
-        else:
-            hourly_solar_map = solar_cloud
-            active_model = "cloud"
+        engine_name = get_active_engine_name(db)
+        solar_result = build_engine_hourly_solar(
+            raw_solar, hourly, db, today, engine_name
+        )
+        hourly_solar_map = solar_result["hourly_solar"]
 
         if sum(hourly_solar_map.values()) <= 0:
             return current_target
@@ -187,9 +181,9 @@ def _maybe_revise_target(ha, db, today, current_target, current_soc):
         revised = max(reserve_target, min(max_soc, revised))
         revised = int(round(revised / 5) * 5)
 
-        cloud_total = sum(solar_cloud.values())
-        rad_total = sum(solar_rad.values()) if solar_rad else 0
-        log.info(f"Revision sim ({active_model}): solar cloud={cloud_total:.1f}kWh, "
+        cloud_total = solar_result["cloud_total"]
+        rad_total = solar_result["radiation_total"]
+        log.info(f"Revision sim ({engine_name}): solar cloud={cloud_total:.1f}kWh, "
                  f"rad={rad_total:.1f}kWh, "
                  f"min_soc={sim['min_soc']}% at {sim['min_soc_hour']}:00, "
                  f"optimal={revised}%, current_target={current_target}%")

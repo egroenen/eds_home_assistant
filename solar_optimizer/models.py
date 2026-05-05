@@ -6,7 +6,7 @@ from .config import (
     HOURLY_SOLAR_WEIGHT, HOURLY_CONSUMPTION_WEIGHT,
     CONDITION_MAP, TEMP_BANDS, NZ_SEASONS, WEEKEND_DAYS,
     BATTERY_CAPACITY_KWH, BATTERY_RESERVE_PCT,
-    PEAK_START_HOUR, PEAK_END_HOUR, SOLAR_LAST_HOUR,
+    PEAK_START_HOUR, PEAK_END_HOUR, SOLAR_FIRST_HOUR, SOLAR_LAST_HOUR,
 )
 from .db import get_param
 
@@ -21,13 +21,41 @@ def get_temp_factor(db, temp_c):
     return get_param(db, "temp_factor_warm") or 0.85
 
 
-def build_hourly_solar(raw_solar, hourly_forecast, db):
+def _get_target_month(target_date=None):
+    """Return the month for a target date-like value."""
+    if target_date is None:
+        return datetime.now().month
+    if isinstance(target_date, str):
+        return datetime.strptime(target_date, "%Y-%m-%d").month
+    return target_date.month
+
+
+def get_solar_window(target_date=None):
+    """Return the first and last hour with meaningful solar production."""
+    month = _get_target_month(target_date)
+    first_hour = SOLAR_FIRST_HOUR.get(month, 7)
+    last_hour = SOLAR_LAST_HOUR.get(month, 20)
+    return first_hour, last_hour
+
+
+def get_daylight_solar_weights(target_date=None):
+    """Return solar weights filtered to the month's meaningful daylight hours."""
+    first_hour, last_hour = get_solar_window(target_date)
+    return {
+        hour: weight
+        for hour, weight in HOURLY_SOLAR_WEIGHT.items()
+        if weight > 0 and first_hour <= hour <= last_hour
+    }
+
+
+def build_hourly_solar(raw_solar, hourly_forecast, db, target_date=None):
     """Build hourly solar production dict using cloud-based corrections (Model A)."""
+    first_hour, last_hour = get_solar_window(target_date)
     result = {}
     for hfc in hourly_forecast:
         hour = hfc["hour"]
         weight = HOURLY_SOLAR_WEIGHT.get(hour, 0)
-        if weight == 0:
+        if weight == 0 or hour < first_hour or hour > last_hour:
             continue
         hour_solar = raw_solar * weight
         hcond = CONDITION_MAP.get(hfc["condition"], hfc["condition"])
@@ -49,26 +77,23 @@ def build_hourly_solar_radiation(raw_solar, hourly_forecast, sw_efficiency_by_ho
     Otherwise falls back to proportionally distributing the Forecast.Solar
     daily total across hours by relative shortwave intensity.
 
-    Hours after SOLAR_LAST_HOUR for the target month are zeroed out because
-    MetOcean reports diffuse shortwave radiation past sunset that panels
-    cannot use.
+    Hours before first light and after last light for the target month are
+    zeroed out because MetOcean can still report ambient shortwave at the
+    edges when the panels are effectively producing nothing.
 
     Returns None if shortwave data is not available.
     """
-    # Determine last production hour for this month
-    if target_date is None:
-        month = datetime.now().month
-    elif isinstance(target_date, str):
-        month = datetime.strptime(target_date, "%Y-%m-%d").month
-    else:
-        month = target_date.month
-    last_hour = SOLAR_LAST_HOUR.get(month, 20)
+    first_hour, last_hour = get_solar_window(target_date)
 
     sw_by_hour = {}
     for hfc in hourly_forecast:
         hour = hfc["hour"]
         sw = hfc.get("shortwave_wm2")
-        if sw is not None and hour in HOURLY_SOLAR_WEIGHT and hour <= last_hour:
+        if (
+            sw is not None
+            and hour in HOURLY_SOLAR_WEIGHT
+            and first_hour <= hour <= last_hour
+        ):
             sw_by_hour[hour] = max(0, sw)
 
     if not sw_by_hour or sum(sw_by_hour.values()) <= 0:

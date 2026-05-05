@@ -13,6 +13,12 @@ Usage:
     python3 -m solar_optimizer history [N]  # Show last N days (default 14)
     python3 -m solar_optimizer set-param KEY VALUE  # Manually set a learning parameter
     python3 -m solar_optimizer reset        # Reset learning parameters to defaults
+    python3 -m solar_optimizer engines      # List available solar engines
+    python3 -m solar_optimizer profile list
+    python3 -m solar_optimizer profile save NAME
+    python3 -m solar_optimizer profile load NAME
+    python3 -m solar_optimizer profile show NAME
+    python3 -m solar_optimizer backtest     # Backtest candidate profiles against history
 
 Environment:
     HASS_SERVER  - Home Assistant URL (e.g. http://localhost:8123)
@@ -33,6 +39,18 @@ from .registers import write_tou_config, store_plan
 from .polling import poll_snapshot
 from .learning import record_outcome, backup_db
 from .dashboard import write_dashboard_status, write_history_status, show_status, show_history
+from .engines import list_engines
+from .profiles import (
+    clear_meta,
+    ensure_original_profile,
+    get_active_engine_name,
+    get_active_profile_name,
+    get_profile,
+    get_profile_names,
+    load_profile,
+    save_profile,
+)
+from .backtest import format_backtest_report, run_backtest
 
 log = logging.getLogger("solar_optimizer")
 
@@ -71,6 +89,9 @@ def load_env():
     return server, token
 
 
+ONLINE_MODES = {"optimize", "dry-run", "record", "poll", "status"}
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -80,12 +101,14 @@ def main():
     verbose = "-v" in sys.argv or "--verbose" in sys.argv
 
     setup_logging(verbose)
-    load_env()
-
-    server = os.environ["HASS_SERVER"]
-    token = os.environ["HASS_TOKEN"]
-    ha = HomeAssistantAPI(server, token)
     db = get_db()
+    ha = None
+
+    if mode in ONLINE_MODES:
+        load_env()
+        server = os.environ["HASS_SERVER"]
+        token = os.environ["HASS_TOKEN"]
+        ha = HomeAssistantAPI(server, token)
 
     try:
         if mode == "optimize":
@@ -152,6 +175,7 @@ def main():
             value = float(sys.argv[3])
             old = get_param(db, key)
             set_param(db, key, value)
+            clear_meta(db, "active_profile")
             print(f"Set {key}: {old} -> {value}")
 
         elif mode == "reset":
@@ -162,7 +186,82 @@ def main():
                     (key, val, now),
                 )
             db.commit()
+            clear_meta(db, "active_profile")
             print("Learning parameters reset to defaults")
+
+        elif mode == "engines":
+            print("\nAvailable engines:")
+            for engine in list_engines():
+                marker = " *" if engine["name"] == get_active_engine_name(db) else ""
+                print(f"  {engine['name']:<18} {engine['description']}{marker}")
+            print()
+
+        elif mode == "profile":
+            if len(sys.argv) < 3:
+                print("Usage: solar_optimizer profile list|save|load|show NAME")
+                sys.exit(1)
+            action = sys.argv[2].lower()
+            ensure_original_profile(db)
+
+            if action == "list":
+                active = get_active_profile_name(db)
+                print("\nProfiles:")
+                for name in get_profile_names(db):
+                    profile = get_profile(db, name)
+                    marker = " *" if name == active else ""
+                    print(f"  {name:<30} engine={profile['engine_name']}{marker}")
+                print()
+            elif action == "save":
+                if len(sys.argv) < 4:
+                    print("Usage: solar_optimizer profile save NAME")
+                    sys.exit(1)
+                name = sys.argv[3]
+                save_profile(db, name)
+                print(f"Saved current parameters as profile '{name}'")
+            elif action == "load":
+                if len(sys.argv) < 4:
+                    print("Usage: solar_optimizer profile load NAME")
+                    sys.exit(1)
+                name = sys.argv[3]
+                profile = load_profile(db, name)
+                print(f"Loaded profile '{name}' (engine={profile['engine_name']})")
+            elif action == "show":
+                if len(sys.argv) < 4:
+                    print("Usage: solar_optimizer profile show NAME")
+                    sys.exit(1)
+                name = sys.argv[3]
+                profile = get_profile(db, name)
+                if not profile:
+                    print(f"Profile not found: {name}")
+                    sys.exit(1)
+                print(f"\nProfile: {name}")
+                print(f"  Engine: {profile['engine_name']}")
+                print(f"  Source: {profile['source']}")
+                print(f"  Description: {profile['description']}")
+                if profile["score_peak_grid"] is not None:
+                    print(f"  Backtest peak kWh: {profile['score_peak_grid']:.1f}")
+                if profile["score_cost"] is not None:
+                    print(f"  Backtest cost: {profile['score_cost']:.2f}")
+                print("\n  Parameters:")
+                for key in sorted(profile["params"]):
+                    print(f"    {key:30s} = {profile['params'][key]}")
+                print()
+            else:
+                print(f"Unknown profile action: {action}")
+                sys.exit(1)
+
+        elif mode == "backtest":
+            ensure_original_profile(db)
+            results = run_backtest(db)
+            print()
+            print(format_backtest_report(results))
+            if results:
+                best = results[0]
+                print(
+                    f"\nBest fit: {best['name']} "
+                    f"(engine={best['engine_name']}, peak={best['total_peak_grid_kwh']:.1f}kWh, "
+                    f"cost={best['total_cost']:.2f})\n"
+                )
 
         else:
             print(f"Unknown mode: {mode}")

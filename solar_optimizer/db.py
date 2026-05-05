@@ -2,6 +2,7 @@
 
 import logging
 import sqlite3
+from collections.abc import Mapping
 from datetime import datetime
 
 from .config import DB_PATH, DEFAULT_PARAMS
@@ -70,6 +71,30 @@ def init_db(db):
             param_key   TEXT PRIMARY KEY,
             param_value REAL NOT NULL,
             updated_at  TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS optimizer_meta (
+            meta_key    TEXT PRIMARY KEY,
+            meta_value  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS parameter_profile (
+            name              TEXT PRIMARY KEY,
+            created_at        TEXT NOT NULL,
+            description       TEXT,
+            engine_name       TEXT NOT NULL DEFAULT 'radiation',
+            source            TEXT,
+            score_peak_grid   REAL,
+            score_cost        REAL
+        );
+
+        CREATE TABLE IF NOT EXISTS parameter_profile_value (
+            profile_name      TEXT NOT NULL,
+            param_key         TEXT NOT NULL,
+            param_value       REAL NOT NULL,
+            PRIMARY KEY (profile_name, param_key),
+            FOREIGN KEY (profile_name) REFERENCES parameter_profile(name) ON DELETE CASCADE
         );
 
         CREATE INDEX IF NOT EXISTS idx_hourly_date ON hourly_log(date);
@@ -144,6 +169,8 @@ def init_db(db):
 
 
 def get_param(db, key):
+    if isinstance(db, Mapping):
+        return db.get(key, DEFAULT_PARAMS.get(key))
     row = db.execute("SELECT param_value FROM learning_params WHERE param_key=?", (key,)).fetchone()
     if row:
         return row[0]

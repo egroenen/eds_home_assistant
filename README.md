@@ -76,6 +76,9 @@ The system runs as a Python package on the HA VM, invoked by HA automations at s
 | `polling.py` | Hourly snapshot recording (SOC, grid, PV, load) and forecast-vs-actual tracking |
 | `learning.py` | Nightly learning cycle: weather corrections, consumption patterns, temperature factors, SW efficiency |
 | `dashboard.py` | Writes JSON status for HA dashboard cards and CLI `status`/`history` display |
+| `engines.py` | Pluggable solar forecast engines (`cloud`, `radiation`, `blended`, `capped_radiation`) |
+| `profiles.py` | Named parameter-set storage and activation (`original`, `best-fit`, manual snapshots) |
+| `backtest.py` | Historical tuning and backtesting against recorded hourly data and peak-cost scoring |
 
 ### Dual Solar Forecast Models
 
@@ -126,6 +129,19 @@ At 7am (peak start), the hourly forecast is frozen into the `daily_plan` row. Al
 | Every hour | `poll` | Record metrics, track forecast models, adjust overnight charging |
 | 21:00 | `record` | Record daily outcome, backup DB, run all learning rules |
 | 21:05 | `optimize` | Calculate tomorrow's plan, write TOU registers to inverter |
+
+### Profiles and Backtesting
+
+The optimizer now supports named parameter profiles and pluggable solar engines.
+
+- `python3 -m solar_optimizer engines` -- list available engines
+- `python3 -m solar_optimizer profile list` -- list saved parameter sets
+- `python3 -m solar_optimizer profile save <name>` -- snapshot current parameters
+- `python3 -m solar_optimizer profile load <name>` -- activate a saved set
+- `python3 -m solar_optimizer profile show <name>` -- inspect a saved set
+- `python3 -m solar_optimizer backtest` -- generate candidate sets and rank them by historical peak-cost performance
+
+The backtester scores candidates by simulated peak import cost using the configured peak value rate. A `best-fit` profile is written alongside the generated candidate sets.
 
 ### Deye Inverter Registers
 
