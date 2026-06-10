@@ -1,0 +1,76 @@
+# Solar Optimizer Peak Power Report - 2026-06-10
+
+## Executive summary
+
+The optimiser is reasonably accurate at forecasting solar from MetOcean shortwave radiation, but it is not currently efficient enough at eliminating peak grid import in winter. The main issue is not a single bad constant: many recent days need more usable stored energy than the battery can provide from the 07:00-21:00 peak window.
+
+There was also a real edge-case bug. When Forecast.Solar reported zero or was unavailable, several paths stopped planning from solar entirely even though MetOcean shortwave radiation was still available. That made some plans record zero solar while the house later produced useful PV. The code has been changed so those zero Forecast.Solar cases fall through to the radiation engine instead of giving up.
+
+## Current performance
+
+Measured from the live Home Assistant database snapshot taken on 2026-06-10.
+
+| Window | Complete days | Success days (`Peak <= 0.5 kWh`) | Peak import | Peak cost at 0.32/kWh | Avg peak/day |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 2026-05-06 to 2026-06-10 | 36 | 3 (8.3%) | 230.5 kWh | 73.76 | 6.40 kWh |
+| 2026-06-01 to 2026-06-10 | 10 | 0 (0.0%) | 86.5 kWh | 27.68 | 8.65 kWh |
+
+Physical limit indicators:
+
+| Window | Avg target SOC | Days target 100% | Days ending at 10% | Energy-impossible days | Avoidable fail days |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 2026-05-06 to 2026-06-10 | 93.6% | 27 | 31 | 18 | 15 |
+| 2026-06-01 to 2026-06-10 | 85.5% | 4 | 10 | 6 | 4 |
+
+Interpretation: the system is trying hard, but in June the house often drains the battery to reserve before the peak window ends. Six of the first ten June days were not solvable by parameters alone because the peak-period load minus peak-period solar exceeded what the battery could cover from 100% SOC.
+
+## Forecast accuracy
+
+Radiation forecasting remains the more accurate solar model.
+
+| Window | Cloud model MAE | Radiation model MAE | Radiation better days |
+| --- | ---: | ---: | ---: |
+| 2026-05-06 to 2026-06-10 | 1376 Wh/hour | 796 Wh/hour | 28 of 36 |
+| 2026-06-01 to 2026-06-10 | 1063 Wh/hour | 626 Wh/hour | 6 of 10 |
+
+Interpretation: the optimiser should continue learning from shortwave radiation, but the best cost outcome is not always the most solar-accurate model. For peak-cost avoidance, the backtest currently prefers the blended profile because it tends to charge more conservatively.
+
+## Backtest after zero-forecast fix
+
+The patched backtest now includes 57 usable historical days, including days where the daily Forecast.Solar value was zero.
+
+| Profile | Engine | Days | Simulated peak import | Simulated peak cost | Avg target SOC |
+| --- | --- | ---: | ---: | ---: | ---: |
+| blended-fitted | blended | 57 | 192.7 kWh | 61.66 | 97.4% |
+| cloud-baseline | cloud | 57 | 192.7 kWh | 61.66 | 99.9% |
+| capped-radiation-fitted | capped_radiation | 57 | 192.7 kWh | 61.66 | 99.9% |
+| capped-radiation-fitted-safe | capped_radiation | 57 | 192.7 kWh | 61.66 | 100.0% |
+| radiation-fitted-safe | radiation | 57 | 197.9 kWh | 63.34 | 87.9% |
+| original | radiation | 57 | 200.9 kWh | 64.30 | 83.3% |
+| radiation-fitted | radiation | 57 | 200.9 kWh | 64.30 | 84.2% |
+
+Best one-hit adjustment: load the `best-fit` profile generated from `blended-fitted`. It reduces simulated peak import by 8.2 kWh versus the current radiation-only original set over the 57-day test window.
+
+## Changes made
+
+- Planning no longer falls straight to failsafe when Forecast.Solar is zero; it now attempts radiation-only planning from MetOcean shortwave.
+- Overnight target revision now also uses radiation when the daily solar forecast is zero.
+- Dashboard detail generation now shows the radiation fallback instead of silently dropping detail.
+- Forecast tracking now records radiation-vs-actual rows even when Forecast.Solar is zero.
+- Backtesting now includes zero Forecast.Solar days by evaluating them through the radiation engine.
+- Live Home Assistant was updated, `best-fit` was regenerated and loaded, and the 2026-06-11 plan was written.
+
+## Current live plan
+
+The live optimiser generated the following plan for 2026-06-11:
+
+- Active profile: `best-fit`
+- Active engine: `blended`
+- Overnight SOC target: 100%
+- Forecast.Solar daily value: 2.6 kWh
+- Radiation model total: 22.2 kWh
+- Blended active peak solar estimate: 12.2 kWh
+- Estimated peak consumption: 35.3 kWh
+- Estimated peak deficit: 23.1 kWh
+
+This plan is appropriately conservative. The model expects the battery to still hit reserve before evening even from 100%, so the remaining peak import is likely a capacity/load-shifting problem rather than a tuning-only problem.

@@ -117,7 +117,8 @@ def _build_actual_hourly_maps(db, day):
 def _calculate_target_soc(plan_row, hourly_forecast, params, engine_name):
     raw_solar = plan_row["solar_forecast_kwh"]
     if raw_solar is None or raw_solar <= 0:
-        return None, None
+        raw_solar = 0.0
+        engine_name = "radiation"
 
     solar_result = build_engine_hourly_solar(
         raw_solar, hourly_forecast, params, plan_row["date"], engine_name

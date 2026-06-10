@@ -202,11 +202,16 @@ def write_dashboard_status(ha, db, plan=None):
                 hourly = ha.get_hourly_forecast(plan_date)
                 hourly_source = "ha"
 
-            if hourly and len(hourly) >= 6 and raw_solar and raw_solar > 0:
+            if hourly and len(hourly) >= 6:
+                if raw_solar is None or raw_solar <= 0:
+                    raw_solar = 0.0
                 engine_name = get_active_engine_name(db)
+                active_engine_name = "radiation" if raw_solar <= 0 else engine_name
                 solar_result = build_engine_hourly_solar(
-                    raw_solar, hourly, db, plan_date, engine_name
+                    raw_solar, hourly, db, plan_date, active_engine_name
                 )
+                if sum(solar_result["hourly_solar"].values()) <= 0:
+                    raise ValueError("hourly solar forecast is zero")
                 solar_cloud = solar_result["cloud_hourly"]
                 solar_rad = solar_result["radiation_hourly"]
 
@@ -268,7 +273,7 @@ def write_dashboard_status(ha, db, plan=None):
                     "plan_date": plan_date,
                     "season": season,
                     "seasonal_avg": daily_consumption,
-                    "engine": engine_name,
+                    "engine": active_engine_name,
                     "temp_factor": round(temp_factor, 2),
                     "day_factor": round(day_factor, 2),
                     "avg_temp": round(avg_temp, 1) if avg_temp else None,

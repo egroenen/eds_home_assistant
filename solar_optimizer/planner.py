@@ -54,11 +54,12 @@ def calculate_plan(ha, db):
     log.info(f"Planning for {plan_date} "
              f"({'today' if planning_for_today else 'tomorrow'})")
 
-    # Step 1: Get solar forecast
+    # Step 1: Get solar forecast. Forecast.Solar can be zero/unavailable in
+    # winter; the radiation engine can still plan from MetOcean shortwave.
     raw_solar = ha.get_sensor_float(forecast_sensor)
     if raw_solar is None or raw_solar <= 0:
-        log.warning("Solar forecast unavailable or zero, using failsafe")
-        return make_failsafe_plan("no_forecast")
+        log.warning("Forecast.Solar unavailable or zero, trying radiation-only planning")
+        raw_solar = 0.0
 
     # Step 2: Get weather
     weather = ha.get_weather()
@@ -97,10 +98,14 @@ def calculate_plan(ha, db):
     profile_name = get_active_profile_name(db)
 
     if hourly and len(hourly) >= 6:
+        active_engine_name = "radiation" if raw_solar <= 0 else engine_name
         solar_result = build_engine_hourly_solar(
-            raw_solar, hourly, db, plan_date_str, engine_name
+            raw_solar, hourly, db, plan_date_str, active_engine_name
         )
         hourly_solar_map = solar_result["hourly_solar"]
+        if sum(hourly_solar_map.values()) <= 0:
+            log.warning("Hourly solar forecast unavailable or zero, using failsafe")
+            return make_failsafe_plan("no_hourly_solar")
         peak_solar = solar_result["active_total"]
         adjusted_solar = peak_solar
         correction_factor = adjusted_solar / raw_solar if raw_solar > 0 else 0
@@ -112,10 +117,13 @@ def calculate_plan(ha, db):
         cloud_total = solar_result["cloud_total"]
         rad_total = solar_result["radiation_total"]
         hours_detail = [f"{h}:{hourly_solar_map.get(h, 0):.1f}" for h in sorted(hourly_solar_map)]
-        log.info(f"Solar forecast: {raw_solar:.1f} kWh, active={engine_name}, "
+        log.info(f"Solar forecast: {raw_solar:.1f} kWh, active={active_engine_name}, "
                  f"cloud={cloud_total:.1f} kWh, radiation={rad_total:.1f} kWh "
                  f"[{', '.join(hours_detail)}]")
     else:
+        if raw_solar <= 0:
+            log.warning("No daily or hourly solar forecast available, using failsafe")
+            return make_failsafe_plan("no_forecast")
         normalized = CONDITION_MAP.get(condition, None)
         correction_key = f"{normalized}_correction" if normalized else f"{condition}_correction"
         base_correction = get_param(db, correction_key)
@@ -206,7 +214,7 @@ def calculate_plan(ha, db):
         "energy_deficit_kwh": energy_deficit,
         "correction_factor": correction_factor,
         "slot_socs": slot_socs,
-        "engine_name": engine_name,
+        "engine_name": active_engine_name if hourly and len(hourly) >= 6 else engine_name,
         "profile_name": profile_name,
     }
 

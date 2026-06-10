@@ -134,7 +134,8 @@ def _maybe_revise_target(ha, db, today, current_target, current_soc):
     try:
         raw_solar = ha.get_sensor_float(SENSORS["solar_forecast_today"])
         if raw_solar is None or raw_solar <= 0:
-            return current_target
+            log.info("Forecast.Solar unavailable or zero during revision; trying radiation forecast")
+            raw_solar = 0.0
 
         hourly = get_metocean_hourly(today)
         if not hourly:
@@ -144,12 +145,14 @@ def _maybe_revise_target(ha, db, today, current_target, current_soc):
             return current_target
 
         engine_name = get_active_engine_name(db)
+        active_engine_name = "radiation" if raw_solar <= 0 else engine_name
         solar_result = build_engine_hourly_solar(
-            raw_solar, hourly, db, today, engine_name
+            raw_solar, hourly, db, today, active_engine_name
         )
         hourly_solar_map = solar_result["hourly_solar"]
 
         if sum(hourly_solar_map.values()) <= 0:
+            log.info("No usable hourly solar forecast during revision, keeping target")
             return current_target
 
         daily_consumption = get_seasonal_consumption(db, today)
@@ -183,7 +186,7 @@ def _maybe_revise_target(ha, db, today, current_target, current_soc):
 
         cloud_total = solar_result["cloud_total"]
         rad_total = solar_result["radiation_total"]
-        log.info(f"Revision sim ({engine_name}): solar cloud={cloud_total:.1f}kWh, "
+        log.info(f"Revision sim ({active_engine_name}): solar cloud={cloud_total:.1f}kWh, "
                  f"rad={rad_total:.1f}kWh, "
                  f"min_soc={sim['min_soc']}% at {sim['min_soc_hour']}:00, "
                  f"optimal={revised}%, current_target={current_target}%")

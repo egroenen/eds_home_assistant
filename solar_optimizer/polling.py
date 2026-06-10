@@ -64,7 +64,7 @@ def track_solar_models(ha, db, day, hour, actual_pv_w, battery_soc, load_power_w
     try:
         raw_solar = ha.get_sensor_float(SENSORS["solar_forecast_today"])
         if raw_solar is None or raw_solar <= 0:
-            return
+            raw_solar = 0.0
 
         hourly = get_metocean_hourly(day)
         if not hourly:
