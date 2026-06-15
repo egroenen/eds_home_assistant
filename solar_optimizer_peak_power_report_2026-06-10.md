@@ -74,3 +74,24 @@ The live optimiser generated the following plan for 2026-06-11:
 - Estimated peak deficit: 23.1 kWh
 
 This plan is appropriately conservative. The model expects the battery to still hit reserve before evening even from 100%, so the remaining peak import is likely a capacity/load-shifting problem rather than a tuning-only problem.
+
+## 2026-06-15 charge-bias update
+
+Policy change: when backtested peak-cost results are effectively tied, prefer the profile that charges more. Peak electricity is approximately three times the off-peak price, so a small amount of additional off-peak charging is a better risk than running empty during peak.
+
+The latest live database snapshot produced 62 usable backtest days. Multiple candidates tied on simulated peak import and cost, so the charge-biased ranking selected the highest-SOC tied option:
+
+| Profile | Engine | Days | Simulated peak import | Simulated peak cost | Avg target SOC |
+| --- | --- | ---: | ---: | ---: | ---: |
+| capped-radiation-charge-biased | capped_radiation | 62 | 238.3 kWh | 76.26 | 100.0% |
+| capped-radiation-fitted | capped_radiation | 62 | 238.3 kWh | 76.26 | 100.0% |
+| capped-radiation-fitted-safe | capped_radiation | 62 | 238.3 kWh | 76.26 | 100.0% |
+| cloud-baseline | cloud | 62 | 238.3 kWh | 76.26 | 99.9% |
+| blended-charge-biased | blended | 62 | 238.3 kWh | 76.26 | 99.5% |
+| blended-fitted-safe | blended | 62 | 238.3 kWh | 76.26 | 98.7% |
+| blended-fitted | blended | 62 | 238.3 kWh | 76.26 | 96.8% |
+| original | blended | 62 | 238.3 kWh | 76.26 | 95.4% |
+| radiation-fitted-safe | radiation | 62 | 240.6 kWh | 76.98 | 88.7% |
+| radiation-fitted | radiation | 62 | 244.3 kWh | 78.18 | 85.8% |
+
+Decision: activate `best-fit` from `capped-radiation-charge-biased`. This preserves the same simulated peak-cost outcome as the less conservative tied profiles, but leaves less room for forecast error to turn into expensive peak import.

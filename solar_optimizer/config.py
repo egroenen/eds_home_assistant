@@ -22,6 +22,12 @@ USABLE_CAPACITY_KWH = BATTERY_CAPACITY_KWH * (100 - BATTERY_RESERVE_PCT) / 100  
 # Historical tuning score uses peak-period import as a direct money proxy.
 # Default value provided by the user on 2026-05-05.
 PEAK_VALUE_RATE = 0.32
+OFF_PEAK_VALUE_RATE = PEAK_VALUE_RATE / 3.0
+
+# When profile backtests are effectively tied, prefer the profile that charges
+# more.  The peak tariff is 3x off-peak, so a small amount of extra off-peak
+# charging is a better risk than discovering the battery is empty at peak.
+PROFILE_SELECTION_COST_TOLERANCE = OFF_PEAK_VALUE_RATE * 5.0
 
 # Peak hours (inclusive)
 PEAK_START_HOUR = 7   # 7am

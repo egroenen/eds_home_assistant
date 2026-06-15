@@ -3,6 +3,7 @@
 from .config import (
     BATTERY_CAPACITY_KWH,
     BATTERY_RESERVE_PCT,
+    PROFILE_SELECTION_COST_TOLERANCE,
     PEAK_END_HOUR,
     PEAK_START_HOUR,
     PEAK_VALUE_RATE,
@@ -252,6 +253,7 @@ def generate_candidate_specs(db):
     fitted = fit_radiation_params(db, percentile=50, scale=1.0)
     current_margin = float(base_params.get("safety_margin_pct", 10.0))
     safe_margin = current_margin + 5.0
+    charge_bias_margin = current_margin + 10.0
 
     return [
         {
@@ -290,6 +292,20 @@ def generate_candidate_specs(db):
             "source": "backtest",
         },
         {
+            "name": "blended-fitted-safe",
+            "engine_name": "blended",
+            "params": _with_sw_params(base_params, fitted, scale=0.9, safety_margin=safe_margin),
+            "description": "Blended engine with conservative fitted efficiencies and extra reserve.",
+            "source": "backtest",
+        },
+        {
+            "name": "blended-charge-biased",
+            "engine_name": "blended",
+            "params": _with_sw_params(base_params, fitted, scale=0.85, safety_margin=charge_bias_margin),
+            "description": "Blended engine biased toward extra off-peak charging when forecasts are uncertain.",
+            "source": "backtest",
+        },
+        {
             "name": "capped-radiation-fitted",
             "engine_name": "capped_radiation",
             "params": _with_sw_params(base_params, fitted, scale=1.0, safety_margin=current_margin),
@@ -303,7 +319,48 @@ def generate_candidate_specs(db):
             "description": "Capped radiation engine with conservative fitted efficiencies and extra reserve.",
             "source": "backtest",
         },
+        {
+            "name": "capped-radiation-charge-biased",
+            "engine_name": "capped_radiation",
+            "params": _with_sw_params(base_params, fitted, scale=0.85, safety_margin=charge_bias_margin),
+            "description": "Capped radiation engine biased toward extra off-peak charging when forecasts are uncertain.",
+            "source": "backtest",
+        },
     ]
+
+
+def _avg_soc_for_ranking(result):
+    if result["avg_target_soc"] is None:
+        return 0.0
+    return result["avg_target_soc"]
+
+
+def rank_results_charge_biased(results, cost_tolerance=PROFILE_SELECTION_COST_TOLERANCE):
+    """Rank candidates, preferring more charge when peak-cost scores are close."""
+    if not results:
+        return []
+
+    best_cost = min(result["total_cost"] for result in results)
+
+    def key(result):
+        within_tolerance = result["total_cost"] <= best_cost + cost_tolerance
+        if within_tolerance:
+            return (
+                0,
+                -_avg_soc_for_ranking(result),
+                result["total_cost"],
+                result["total_peak_grid_kwh"],
+                result["name"],
+            )
+        return (
+            1,
+            result["total_cost"],
+            result["total_peak_grid_kwh"],
+            -_avg_soc_for_ranking(result),
+            result["name"],
+        )
+
+    return sorted(results, key=key)
 
 
 def run_backtest(db, peak_rate=PEAK_VALUE_RATE, save_candidates=True):
@@ -326,14 +383,7 @@ def run_backtest(db, peak_rate=PEAK_VALUE_RATE, save_candidates=True):
                 score_cost=metrics["total_cost"],
             )
 
-    ranked = sorted(
-        results,
-        key=lambda item: (
-            item["total_cost"],
-            item["total_peak_grid_kwh"],
-            item["avg_target_soc"] if item["avg_target_soc"] is not None else 999.0,
-        ),
-    )
+    ranked = rank_results_charge_biased(results)
     if ranked and save_candidates:
         best = ranked[0]
         save_profile(
@@ -341,7 +391,10 @@ def run_backtest(db, peak_rate=PEAK_VALUE_RATE, save_candidates=True):
             "best-fit",
             params=best["params"],
             engine_name=best["engine_name"],
-            description=f"Best historical fit by peak-cost backtest at {peak_rate}/kWh.",
+            description=(
+                f"Best historical fit by peak-cost backtest at {peak_rate}/kWh, "
+                "charge-biased for near-ties."
+            ),
             source="backtest-best",
             score_peak_grid=best["total_peak_grid_kwh"],
             score_cost=best["total_cost"],
@@ -352,6 +405,9 @@ def run_backtest(db, peak_rate=PEAK_VALUE_RATE, save_candidates=True):
 def format_backtest_report(results, peak_rate=PEAK_VALUE_RATE):
     lines = []
     lines.append(f"Backtest results (peak rate {peak_rate}/kWh):")
+    lines.append(
+        f"Charge-biased near-tie tolerance: {PROFILE_SELECTION_COST_TOLERANCE:.2f}"
+    )
     lines.append("")
     lines.append(f"{'Profile':<30} {'Engine':<18} {'Days':>4} {'Peak kWh':>10} {'Cost':>10} {'Avg SOC':>8}")
     lines.append("-" * 90)
