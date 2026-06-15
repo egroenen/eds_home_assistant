@@ -95,3 +95,18 @@ The latest live database snapshot produced 62 usable backtest days. Multiple can
 | radiation-fitted | radiation | 62 | 244.3 kWh | 78.18 | 85.8% |
 
 Decision: activate `best-fit` from `capped-radiation-charge-biased`. This preserves the same simulated peak-cost outcome as the less conservative tied profiles, but leaves less room for forecast error to turn into expensive peak import.
+
+## 2026-06-15 generation-accuracy update
+
+The generation estimate was still visibly wrong after the charge-bias update. The cause was systematic, not random: `capped_radiation` was using the very low Forecast.Solar daily value as a cap, so it preserved a conservative charging decision but badly understated likely generation.
+
+Measured over 62 complete days:
+
+| Candidate | Engine | Peak cost | Avg target SOC | Generation ratio | Solar MAE/day |
+| --- | --- | ---: | ---: | ---: | ---: |
+| capped-radiation-charge-biased | capped_radiation | 76.26 | 100.0% | 0.20x | 22.6 kWh |
+| radiation-current | radiation | 76.26 | 92.9% | 0.74x | 9.0 kWh |
+| radiation-median-charge | radiation | 76.26 | 91.9% | 0.87x | 7.1 kWh |
+| radiation-p60-charge, 35% margin | radiation | 76.26 | 100.0% | 0.99x | 6.3 kWh |
+
+Decision: activate a new `radiation-accuracy-charge-biased` profile. It uses the radiation engine, 60th-percentile shortwave efficiencies, and a 35% safety margin. This keeps the same historical peak-cost result and a 100% average target SOC, while making the solar estimate much closer to actual generation.

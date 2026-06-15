@@ -207,6 +207,8 @@ def evaluate_candidate(db, params, engine_name, peak_rate=PEAK_VALUE_RATE):
             continue
 
         actual_sim = _simulate_actual_peak_grid(target_soc, actual_solar_map, actual_load_map)
+        actual_solar_total = sum(actual_solar_map.values())
+        solar_error = solar_result["active_total"] - actual_solar_total
         day_results.append(
             {
                 "date": row["date"],
@@ -216,6 +218,8 @@ def evaluate_candidate(db, params, engine_name, peak_rate=PEAK_VALUE_RATE):
                 "end_soc_pct": actual_sim["end_soc_pct"],
                 "min_soc_pct": actual_sim["min_soc_pct"],
                 "engine_total_kwh": round(solar_result["active_total"], 3),
+                "actual_solar_kwh": round(actual_solar_total, 3),
+                "solar_error_kwh": round(solar_error, 3),
             }
         )
 
@@ -225,6 +229,14 @@ def evaluate_candidate(db, params, engine_name, peak_rate=PEAK_VALUE_RATE):
         sum(day["target_soc"] for day in day_results) / len(day_results)
         if day_results else None
     )
+    avg_solar_mae = (
+        sum(abs(day["solar_error_kwh"]) for day in day_results) / len(day_results)
+        if day_results else None
+    )
+    avg_solar_bias = (
+        sum(day["solar_error_kwh"] for day in day_results) / len(day_results)
+        if day_results else None
+    )
     return {
         "engine_name": engine_name,
         "days": len(day_results),
@@ -232,6 +244,8 @@ def evaluate_candidate(db, params, engine_name, peak_rate=PEAK_VALUE_RATE):
         "total_cost": round(total_cost, 3),
         "avg_peak_grid_kwh": round(total_peak_grid / len(day_results), 3) if day_results else None,
         "avg_target_soc": round(avg_target_soc, 1) if avg_target_soc is not None else None,
+        "avg_solar_mae_kwh": round(avg_solar_mae, 2) if avg_solar_mae is not None else None,
+        "avg_solar_bias_kwh": round(avg_solar_bias, 2) if avg_solar_bias is not None else None,
         "day_results": day_results,
     }
 
@@ -251,9 +265,10 @@ def generate_candidate_specs(db):
     base_params = get_current_params(db)
     current_engine = get_active_engine_name(db)
     fitted = fit_radiation_params(db, percentile=50, scale=1.0)
+    fitted_p60 = fit_radiation_params(db, percentile=60, scale=1.0)
     current_margin = float(base_params.get("safety_margin_pct", 10.0))
-    safe_margin = current_margin + 5.0
-    charge_bias_margin = current_margin + 10.0
+    safe_margin = max(current_margin, 20.0)
+    charge_bias_margin = max(current_margin, 35.0)
 
     return [
         {
@@ -282,6 +297,13 @@ def generate_candidate_specs(db):
             "engine_name": "radiation",
             "params": _with_sw_params(base_params, fitted, scale=0.9, safety_margin=safe_margin),
             "description": "Radiation engine with fitted efficiencies scaled down and a larger safety margin.",
+            "source": "backtest",
+        },
+        {
+            "name": "radiation-accuracy-charge-biased",
+            "engine_name": "radiation",
+            "params": _with_sw_params(base_params, fitted_p60, scale=1.0, safety_margin=charge_bias_margin),
+            "description": "Radiation engine fitted for generation accuracy with charge-biased reserve.",
             "source": "backtest",
         },
         {
@@ -335,8 +357,14 @@ def _avg_soc_for_ranking(result):
     return result["avg_target_soc"]
 
 
+def _solar_mae_for_ranking(result):
+    if result.get("avg_solar_mae_kwh") is None:
+        return 999.0
+    return result["avg_solar_mae_kwh"]
+
+
 def rank_results_charge_biased(results, cost_tolerance=PROFILE_SELECTION_COST_TOLERANCE):
-    """Rank candidates, preferring more charge when peak-cost scores are close."""
+    """Rank candidates, preferring charge first and solar accuracy second."""
     if not results:
         return []
 
@@ -348,6 +376,7 @@ def rank_results_charge_biased(results, cost_tolerance=PROFILE_SELECTION_COST_TO
             return (
                 0,
                 -_avg_soc_for_ranking(result),
+                _solar_mae_for_ranking(result),
                 result["total_cost"],
                 result["total_peak_grid_kwh"],
                 result["name"],
@@ -357,6 +386,7 @@ def rank_results_charge_biased(results, cost_tolerance=PROFILE_SELECTION_COST_TO
             result["total_cost"],
             result["total_peak_grid_kwh"],
             -_avg_soc_for_ranking(result),
+            _solar_mae_for_ranking(result),
             result["name"],
         )
 
@@ -409,12 +439,13 @@ def format_backtest_report(results, peak_rate=PEAK_VALUE_RATE):
         f"Charge-biased near-tie tolerance: {PROFILE_SELECTION_COST_TOLERANCE:.2f}"
     )
     lines.append("")
-    lines.append(f"{'Profile':<30} {'Engine':<18} {'Days':>4} {'Peak kWh':>10} {'Cost':>10} {'Avg SOC':>8}")
-    lines.append("-" * 90)
+    lines.append(f"{'Profile':<34} {'Engine':<18} {'Days':>4} {'Peak kWh':>10} {'Cost':>10} {'Avg SOC':>8} {'Solar MAE':>10}")
+    lines.append("-" * 108)
     for result in results:
         lines.append(
-            f"{result['name']:<30} {result['engine_name']:<18} "
+            f"{result['name']:<34} {result['engine_name']:<18} "
             f"{result['days']:>4} {result['total_peak_grid_kwh']:>10.1f} "
-            f"{result['total_cost']:>10.2f} {result['avg_target_soc']:>8}"
+            f"{result['total_cost']:>10.2f} {result['avg_target_soc']:>8} "
+            f"{result.get('avg_solar_mae_kwh'):>10}"
         )
     return "\n".join(lines)
