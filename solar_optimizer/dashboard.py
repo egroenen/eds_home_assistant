@@ -4,7 +4,13 @@ import json
 import logging
 from datetime import date, datetime, timedelta
 
-from .config import SENSORS, SCRIPT_DIR, PEAK_START_HOUR
+from .config import (
+    BATTERY_CAPACITY_KWH,
+    BATTERY_RESERVE_PCT,
+    SENSORS,
+    SCRIPT_DIR,
+    PEAK_START_HOUR,
+)
 from .db import get_param
 from .models import (
     build_hourly_consumption, get_season, get_seasonal_consumption,
@@ -122,6 +128,7 @@ def write_dashboard_status(ha, db, plan=None):
         "temp_cool": get_param(db, "temp_factor_cool"),
         "temp_mild": get_param(db, "temp_factor_mild"),
         "temp_warm": get_param(db, "temp_factor_warm"),
+        "safety_margin": get_param(db, "safety_margin_pct"),
         "sw_scale_spring": get_param(db, "sw_efficiency_scale_spring"),
         "sw_scale_summer": get_param(db, "sw_efficiency_scale_summer"),
         "sw_scale_autumn": get_param(db, "sw_efficiency_scale_autumn"),
@@ -163,6 +170,18 @@ def write_dashboard_status(ha, db, plan=None):
             ).fetchone()
             if frozen_row and frozen_row["frozen_detail"]:
                 frozen = json.loads(frozen_row["frozen_detail"])
+                active_profile = get_active_profile_name(db)
+                if frozen.get("profile") != active_profile:
+                    log.info(
+                        "Frozen forecast profile changed "
+                        f"({frozen.get('profile')} -> {active_profile}), regenerating"
+                    )
+                    db.execute(
+                        "UPDATE daily_plan SET frozen_detail=NULL WHERE date=?",
+                        (plan_date,),
+                    )
+                    db.commit()
+                    frozen = None
 
         if frozen:
             if "active_total" not in frozen:
@@ -173,16 +192,35 @@ def write_dashboard_status(ha, db, plan=None):
                     frozen["active_total"] = frozen.get("rad_total")
                 else:
                     frozen["active_total"] = p.get("adjusted_solar_kwh") if p else None
+            if "reserve_target_pct" not in frozen:
+                safety_margin = get_param(db, "safety_margin_pct") or 0
+                frozen["battery_reserve_pct"] = BATTERY_RESERVE_PCT
+                frozen["safety_margin_pct"] = safety_margin
+                frozen["reserve_target_pct"] = BATTERY_RESERVE_PCT + safety_margin
+            if "sim_shortfall_kwh" not in frozen:
+                min_soc = frozen.get("sim_min_soc")
+                reserve = frozen.get("battery_reserve_pct", BATTERY_RESERVE_PCT)
+                if min_soc is not None and min_soc < reserve:
+                    frozen["sim_shortfall_kwh"] = round(
+                        ((reserve - min_soc) / 100.0) * BATTERY_CAPACITY_KWH,
+                        2,
+                    )
+                else:
+                    frozen["sim_shortfall_kwh"] = 0
 
             # Use frozen forecast, but update actuals from hourly_log
             log_rows = db.execute(
                 "SELECT hour, battery_soc, load_consumption_kwh, pv_production_kwh "
-                "FROM hourly_log WHERE date=? ORDER BY hour",
+                "FROM hourly_log WHERE date=? ORDER BY hour, timestamp",
                 (plan_date,)
             ).fetchall()
-            actual_soc_by_hour = {r["hour"]: r["battery_soc"] for r in log_rows}
-            cons_counter_by_hour = {r["hour"]: r["load_consumption_kwh"] for r in log_rows}
-            pv_counter_by_hour = {r["hour"]: r["pv_production_kwh"] for r in log_rows}
+            actual_soc_by_hour = {}
+            cons_counter_by_hour = {}
+            pv_counter_by_hour = {}
+            for r in log_rows:
+                actual_soc_by_hour.setdefault(r["hour"], r["battery_soc"])
+                cons_counter_by_hour.setdefault(r["hour"], r["load_consumption_kwh"])
+                pv_counter_by_hour.setdefault(r["hour"], r["pv_production_kwh"])
 
             for h_entry in frozen["hours"]:
                 h = h_entry["hour"]
@@ -201,6 +239,7 @@ def write_dashboard_status(ha, db, plan=None):
                 next_cons = cons_counter_by_hour.get(h + 1)
                 h_entry["actual_consumption_kwh"] = round(next_cons - cur_cons, 2) if (cur_cons is not None and next_cons is not None) else None
 
+            _add_live_solar_projection(ha, frozen, plan_date, today, now_hour)
             status["detail"] = frozen
         else:
             # Recalculate forecast (pre-7am or no frozen data yet)
@@ -239,15 +278,21 @@ def write_dashboard_status(ha, db, plan=None):
                 active_solar = solar_result["hourly_solar"]
                 soc_target = p.get("overnight_soc_target", 70) if p else 70
                 sim = simulate_battery_hourly(soc_target, active_solar, hourly_consumption_map)
+                safety_margin = get_param(db, "safety_margin_pct") or 0
+                reserve_target = BATTERY_RESERVE_PCT + safety_margin
 
                 log_rows = db.execute(
                     "SELECT hour, battery_soc, load_consumption_kwh, pv_production_kwh "
-                    "FROM hourly_log WHERE date=? ORDER BY hour",
+                    "FROM hourly_log WHERE date=? ORDER BY hour, timestamp",
                     (plan_date,)
                 ).fetchall()
-                actual_soc_by_hour = {r["hour"]: r["battery_soc"] for r in log_rows}
-                cons_counter_by_hour = {r["hour"]: r["load_consumption_kwh"] for r in log_rows}
-                pv_counter_by_hour = {r["hour"]: r["pv_production_kwh"] for r in log_rows}
+                actual_soc_by_hour = {}
+                cons_counter_by_hour = {}
+                pv_counter_by_hour = {}
+                for r in log_rows:
+                    actual_soc_by_hour.setdefault(r["hour"], r["battery_soc"])
+                    cons_counter_by_hour.setdefault(r["hour"], r["load_consumption_kwh"])
+                    pv_counter_by_hour.setdefault(r["hour"], r["pv_production_kwh"])
 
                 sim_soc_map = dict(sim["hourly_soc"])
                 detail_hours = []
@@ -285,6 +330,7 @@ def write_dashboard_status(ha, db, plan=None):
                     "source": hourly_source,
                     "raw_solar": raw_solar,
                     "plan_date": plan_date,
+                    "profile": get_active_profile_name(db),
                     "season": season,
                     "seasonal_avg": daily_consumption,
                     "engine": active_engine_name,
@@ -297,8 +343,13 @@ def write_dashboard_status(ha, db, plan=None):
                     "consumption_total": round(sum(hourly_consumption_map.values()), 1),
                     "sim_min_soc": sim["min_soc"],
                     "sim_min_hour": sim["min_soc_hour"],
+                    "sim_shortfall_kwh": sim.get("shortfall_kwh", 0),
+                    "battery_reserve_pct": BATTERY_RESERVE_PCT,
+                    "safety_margin_pct": safety_margin,
+                    "reserve_target_pct": reserve_target,
                     "hours": detail_hours,
                 }
+                _add_live_solar_projection(ha, detail, plan_date, today, now_hour)
                 status["detail"] = detail
 
                 # Freeze the forecast at 7am for daytime tracking
@@ -340,6 +391,25 @@ def write_dashboard_status(ha, db, plan=None):
     status_path = SCRIPT_DIR / "solar_optimizer_status.json"
     status_path.write_text(json.dumps(status, indent=2))
     log.info(f"Dashboard status written to {status_path}")
+
+
+def _add_live_solar_projection(ha, detail, plan_date, today, now_hour):
+    """Add actual-so-far plus forecast-remaining solar projection for today."""
+    if plan_date != today:
+        return
+
+    actual_so_far = ha.get_sensor_float(SENSORS["daily_production"])
+    if actual_so_far is None:
+        return
+
+    remaining = 0.0
+    for hour in detail.get("hours", []):
+        h = hour.get("hour")
+        if h is not None and h > now_hour:
+            remaining += hour.get("solar_active", hour.get("solar_rad", 0)) or 0
+
+    detail["actual_solar_so_far"] = round(actual_so_far, 1)
+    detail["live_projected_solar"] = round(actual_so_far + remaining, 1)
 
 
 def write_history_status(db):

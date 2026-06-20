@@ -90,11 +90,15 @@ def _build_actual_hourly_maps(db, day):
         SELECT hour, load_consumption_kwh, pv_production_kwh
         FROM hourly_log
         WHERE date=?
-        ORDER BY hour
+        ORDER BY hour, timestamp
         """,
         (day,),
     ).fetchall()
-    by_hour = {row["hour"]: row for row in rows}
+    by_hour = {}
+    for row in rows:
+        # Use the first snapshot for each hour boundary. Manual refreshes can
+        # create later rows with the same hour, which would inflate deltas.
+        by_hour.setdefault(row["hour"], row)
     if not all(hour in by_hour for hour in range(PEAK_START_HOUR, PEAK_END_HOUR + 1)):
         return None, None
 
