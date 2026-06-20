@@ -59,10 +59,15 @@ def record_outcome(ha, db):
 
     peak_grid_used = 1 if (peak_grid_kwh or 0) > 0.5 else 0
 
-    plan = db.execute("SELECT solar_forecast_kwh FROM daily_plan WHERE date=?", (today,)).fetchone()
+    plan = db.execute(
+        "SELECT solar_forecast_kwh, adjusted_solar_kwh FROM daily_plan WHERE date=?",
+        (today,),
+    ).fetchone()
     forecast_accuracy = None
-    if plan and plan["solar_forecast_kwh"] and plan["solar_forecast_kwh"] > 0 and production:
-        forecast_accuracy = production / plan["solar_forecast_kwh"]
+    if plan and production:
+        forecast = plan["adjusted_solar_kwh"] or plan["solar_forecast_kwh"]
+        if forecast and forecast > 0:
+            forecast_accuracy = production / forecast
 
     weather = ha.get_weather()
     temp_high = weather.get("temperature")

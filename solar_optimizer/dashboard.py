@@ -161,6 +161,15 @@ def write_dashboard_status(ha, db, plan=None):
                 frozen = json.loads(frozen_row["frozen_detail"])
 
         if frozen:
+            if "active_total" not in frozen:
+                engine = frozen.get("engine")
+                if engine == "cloud":
+                    frozen["active_total"] = frozen.get("cloud_total")
+                elif engine == "radiation":
+                    frozen["active_total"] = frozen.get("rad_total")
+                else:
+                    frozen["active_total"] = p.get("adjusted_solar_kwh") if p else None
+
             # Use frozen forecast, but update actuals from hourly_log
             log_rows = db.execute(
                 "SELECT hour, battery_soc, load_consumption_kwh, pv_production_kwh "
@@ -257,6 +266,7 @@ def write_dashboard_status(ha, db, plan=None):
                         "cloud": round(hfc.get("cloud_coverage", 0)),
                         "temp": hfc.get("temperature"),
                         "sw_wm2": hfc.get("shortwave_wm2"),
+                        "solar_active": round(active_solar.get(h, 0), 2),
                         "solar_cloud": round(solar_cloud.get(h, 0), 2),
                         "solar_rad": round((solar_rad or {}).get(h, 0), 2),
                         "actual_pv_kwh": actual_pv_kwh,
@@ -277,6 +287,7 @@ def write_dashboard_status(ha, db, plan=None):
                     "temp_factor": round(temp_factor, 2),
                     "day_factor": round(day_factor, 2),
                     "avg_temp": round(avg_temp, 1) if avg_temp else None,
+                    "active_total": round(solar_result["active_total"], 1),
                     "cloud_total": round(sum(solar_cloud.values()), 1),
                     "rad_total": round(sum(solar_rad.values()), 1) if solar_rad else None,
                     "consumption_total": round(sum(hourly_consumption_map.values()), 1),
@@ -356,11 +367,12 @@ def write_history_status(db):
     for r in rows:
         production = r["production_kwh"]
         consumption = r["consumption_kwh"]
-        forecast = r["forecast_kwh"]
+        raw_forecast = r["forecast_kwh"]
+        adjusted = r["adjusted_kwh"]
+        forecast = adjusted if adjusted and adjusted > 0 else raw_forecast
         grid_bought = r["grid_bought_kwh"]
         peak_grid = r["peak_grid_kwh"]
         grid_sold = r["grid_sold_kwh"]
-        adjusted = r["adjusted_kwh"]
 
         # Off-peak grid = total grid bought minus peak grid bought
         off_peak_grid = round(grid_bought - peak_grid, 1) if (
@@ -378,6 +390,7 @@ def write_history_status(db):
             "date": r["date"],
             "plan_weather": r["plan_weather"],
             "actual_weather": r["actual_weather"],
+            "raw_forecast_kwh": round(raw_forecast, 1) if raw_forecast else None,
             "forecast_kwh": round(forecast, 1) if forecast else None,
             "adjusted_kwh": round(adjusted, 1) if adjusted else None,
             "production_kwh": round(production, 1) if production else None,
@@ -391,7 +404,9 @@ def write_history_status(db):
             "soc_target": r["soc_target"],
             "deficit_kwh": round(r["deficit_kwh"], 1) if r["deficit_kwh"] else None,
             "correction": round(r["correction"], 2) if r["correction"] else None,
-            "forecast_accuracy": round(r["forecast_accuracy"], 2) if r["forecast_accuracy"] else None,
+            "forecast_accuracy": round(production / forecast, 2) if (
+                production is not None and forecast and forecast > 0
+            ) else None,
             "peak_grid_used": bool(r["peak_grid_used"]),
             "temp_high": round(r["temp_high"], 1) if r["temp_high"] is not None else None,
         })
@@ -472,7 +487,7 @@ def show_history(db, days=14):
         print("No history available yet.")
         return
 
-    print(f"\n{'Date':<12} {'Forecast':>8} {'Actual':>8} {'Weather':<14} "
+    print(f"\n{'Date':<12} {'Model':>8} {'Actual':>8} {'Weather':<14} "
           f"{'SOC%':>5} {'Grid':>6} {'Peak':>6} {'Accuracy':>8}")
     print("-" * 80)
 
@@ -480,10 +495,16 @@ def show_history(db, days=14):
         actual = f"{r['actual_production_kwh']:.1f}" if r['actual_production_kwh'] else "-"
         grid = f"{r['grid_bought_kwh']:.1f}" if r['grid_bought_kwh'] else "-"
         peak = f"{r['peak_grid_kwh']:.1f}" if r['peak_grid_kwh'] is not None else "-"
-        acc = f"{r['forecast_accuracy']:.2f}" if r['forecast_accuracy'] else "-"
+        model_forecast = r["adjusted_solar_kwh"] or r["solar_forecast_kwh"]
+        acc_value = (
+            r["actual_production_kwh"] / model_forecast
+            if r["actual_production_kwh"] and model_forecast and model_forecast > 0
+            else None
+        )
+        acc = f"{acc_value:.2f}" if acc_value else "-"
         peak_flag = " *" if r['peak_grid_used'] else ""
 
-        print(f"{r['date']:<12} {r['solar_forecast_kwh']:>8.1f} {actual:>8} "
+        print(f"{r['date']:<12} {model_forecast:>8.1f} {actual:>8} "
               f"{r['plan_weather'] or '-':<14} {r['overnight_soc_target']:>4}% "
               f"{grid:>6} {peak:>5}{peak_flag} {acc:>8}")
 

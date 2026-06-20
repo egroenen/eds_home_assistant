@@ -133,3 +133,18 @@ Solar estimate check: the calibrated radiation profile estimated 82.6 kWh peak-p
 | 75th percentile | 1.20x | 8.50 kWh | 0.97x | 2.18 kWh | Chases the week |
 
 Decision: no profile change. The system is already charging to 100%, the active profile remains the best full-history fit, and this week's remaining peak import is mostly battery capacity/timing rather than a solvable overnight-charge target problem.
+
+## 2026-06-20 dashboard estimate display fix
+
+The Solar History tab was still showing `solar_forecast_kwh`, which is the raw Forecast.Solar daily value. In June this value has often been around 2-3 kWh even when the calibrated radiation model estimated 20-25 kWh and actual production was 28-32 kWh. That made the dashboard look as if the optimiser estimate was wrong by 10x, even though the active planning estimate was much closer.
+
+Example after regenerating history:
+
+| Date | Raw Forecast.Solar | Displayed model estimate | Actual production | Model accuracy |
+| --- | ---: | ---: | ---: | ---: |
+| 2026-06-19 | 2.3 kWh | 24.7 kWh | 32.4 kWh | 131% |
+| 2026-06-18 | 2.5 kWh | 21.2 kWh | 28.0 kWh | 132% |
+| 2026-06-17 | 2.4 kWh | 10.1 kWh | 11.1 kWh | 109% |
+| 2026-06-16 | 2.6 kWh | 24.4 kWh | 32.3 kWh | 132% |
+
+Changes made: the History tab now displays the optimiser's adjusted/model estimate, keeps the raw Forecast.Solar value in JSON as `raw_forecast_kwh`, and computes delta/accuracy against the model estimate. The summary and detail cards now use `active_total` from the active engine instead of assuming the cloud model total.
