@@ -110,3 +110,26 @@ Measured over 62 complete days:
 | radiation-p60-charge, 35% margin | radiation | 76.26 | 100.0% | 0.99x | 6.3 kWh |
 
 Decision: activate a new `radiation-accuracy-charge-biased` profile. It uses the radiation engine, 60th-percentile shortwave efficiencies, and a 35% safety margin. This keeps the same historical peak-cost result and a 100% average target SOC, while making the solar estimate much closer to actual generation.
+
+## 2026-06-20 one-week review
+
+Reviewed the first four complete days after the generation-accuracy calibration, 2026-06-16 to 2026-06-19.
+
+| Date | Target SOC | 07:00 SOC | Peak import | Peak cost | Peak load | Peak solar | Required start SOC | Assessment |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 2026-06-16 | 100% | 100% | 0.7 kWh | 0.22 | 41.1 kWh | 32.3 kWh | 68.7% | Small timing/reserve leakage |
+| 2026-06-17 | 100% | 100% | 16.2 kWh | 5.18 | 39.6 kWh | 11.1 kWh | 200.0% | Battery-capacity impossible |
+| 2026-06-18 | 100% | 100% | 1.4 kWh | 0.45 | 37.7 kWh | 28.0 kWh | 74.7% | Small timing/reserve leakage |
+| 2026-06-19 | 100% | 100% | 7.2 kWh | 2.30 | 48.1 kWh | 32.4 kWh | 114.7% | Battery-capacity impossible |
+
+Weekly result: 25.5 kWh peak import, costing 8.16 at 0.32/kWh. Two of the four completed days could not be solved by overnight charging because even a full battery did not contain enough usable energy for the peak-period net load.
+
+Solar estimate check: the calibrated radiation profile estimated 82.6 kWh peak-period solar versus 103.8 kWh actual over these four days. A higher percentile fit would improve these four days, but it worsens the full 66-day history:
+
+| Fit | All-history ratio | All-history MAE/day | Week ratio | Week MAE/day | Decision |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 60th percentile | 0.99x | 6.26 kWh | 0.80x | 5.29 kWh | Keep |
+| 70th percentile | 1.10x | 7.09 kWh | 0.89x | 3.66 kWh | Too recent-biased |
+| 75th percentile | 1.20x | 8.50 kWh | 0.97x | 2.18 kWh | Chases the week |
+
+Decision: no profile change. The system is already charging to 100%, the active profile remains the best full-history fit, and this week's remaining peak import is mostly battery capacity/timing rather than a solvable overnight-charge target problem.
