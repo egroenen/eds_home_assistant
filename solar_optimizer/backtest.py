@@ -259,6 +259,12 @@ def _with_sw_params(base_params, fitted_params, scale=1.0, safety_margin=None):
     return params
 
 
+def _with_season_scale(params, season, scale):
+    adjusted = dict(params)
+    adjusted[f"sw_efficiency_scale_{season}"] = float(scale)
+    return adjusted
+
+
 def generate_candidate_specs(db):
     ensure_original_profile(db)
 
@@ -304,6 +310,17 @@ def generate_candidate_specs(db):
             "engine_name": "radiation",
             "params": _with_sw_params(base_params, fitted_p60, scale=1.0, safety_margin=charge_bias_margin),
             "description": "Radiation engine fitted for generation accuracy with charge-biased reserve.",
+            "source": "backtest",
+        },
+        {
+            "name": "radiation-winter-scaled-charge-biased",
+            "engine_name": "radiation",
+            "params": _with_season_scale(
+                _with_sw_params(base_params, fitted_p60, scale=1.0, safety_margin=charge_bias_margin),
+                "winter",
+                1.20,
+            ),
+            "description": "Radiation engine with winter shortwave scaling and charge-biased reserve.",
             "source": "backtest",
         },
         {

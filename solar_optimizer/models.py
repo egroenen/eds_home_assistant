@@ -117,12 +117,18 @@ def build_hourly_solar_radiation(raw_solar, hourly_forecast, sw_efficiency_by_ho
     return result
 
 
-def get_sw_efficiency_map(db):
+def get_sw_efficiency_map(db, target_date=None):
     """Load per-hour shortwave efficiency values from learning params."""
+    season = get_season(target_date) if target_date else None
+    scale = get_param(db, f"sw_efficiency_scale_{season}") if season else 1.0
+    if scale is None:
+        scale = 1.0
+
     result = {}
     for hour in HOURLY_SOLAR_WEIGHT:
         v = get_param(db, f"sw_efficiency_{hour}")
-        result[hour] = v if v is not None else 0.018
+        base = v if v is not None else 0.018
+        result[hour] = min(0.08, max(0.0, base * scale))
     return result
 
 

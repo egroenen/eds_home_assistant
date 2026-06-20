@@ -148,3 +148,17 @@ Example after regenerating history:
 | 2026-06-16 | 2.6 kWh | 24.4 kWh | 32.3 kWh | 132% |
 
 Changes made: the History tab now displays the optimiser's adjusted/model estimate, keeps the raw Forecast.Solar value in JSON as `raw_forecast_kwh`, and computes delta/accuracy against the model estimate. The summary and detail cards now use `active_total` from the active engine instead of assuming the cloud model total.
+
+## 2026-06-20 winter estimate calibration
+
+The corrected dashboard made it clear that the active radiation estimate was still consistently low in June, even though the 100% charge target was correct. The issue was not the daily charge decision; it was that the same global shortwave efficiencies were being used across autumn and winter.
+
+Measured against the live database snapshot:
+
+| Candidate | All-history ratio | All-history MAE/day | June ratio | June MAE/day | Last completed days ratio | Last completed days MAE/day |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Current learned radiation | 1.02x | 6.33 kWh | 0.90x | 6.05 kWh | 0.83x | 4.86 kWh |
+| Winter scale 1.10 | 1.04x | 6.14 kWh | 0.99x | 5.35 kWh | 0.91x | 3.31 kWh |
+| Winter scale 1.20 | 1.06x | 5.95 kWh | 1.08x | 4.66 kWh | 0.99x | 1.75 kWh |
+
+Decision: add seasonal shortwave efficiency scalars and activate `radiation-winter-scaled-charge-biased` with `sw_efficiency_scale_winter = 1.20`. This keeps the same historical peak-cost score and 100% average SOC, while giving materially better winter generation estimates.

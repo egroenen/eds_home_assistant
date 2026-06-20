@@ -73,7 +73,7 @@ def track_solar_models(ha, db, day, hour, actual_pv_w, battery_soc, load_power_w
             return
 
         solar_cloud = build_hourly_solar(raw_solar, hourly, db, target_date=day)
-        sw_eff_map = get_sw_efficiency_map(db)
+        sw_eff_map = get_sw_efficiency_map(db, target_date=day)
         solar_rad = build_hourly_solar_radiation(raw_solar, hourly, sw_eff_map,
                                                  target_date=day)
 

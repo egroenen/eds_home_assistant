@@ -32,7 +32,7 @@ def build_engine_hourly_solar(raw_solar, hourly_forecast, params, target_date, e
     solar_cloud = build_hourly_solar(
         raw_solar, hourly_forecast, params, target_date=target_date
     )
-    sw_eff_map = get_sw_efficiency_map(params)
+    sw_eff_map = get_sw_efficiency_map(params, target_date=target_date)
     solar_rad = build_hourly_solar_radiation(
         raw_solar, hourly_forecast, sw_eff_map, target_date=target_date
     ) or {}
@@ -70,4 +70,3 @@ def build_engine_hourly_solar(raw_solar, hourly_forecast, params, target_date, e
         "radiation_total": sum(solar_rad.values()),
         "active_total": sum(active.values()),
     }
-

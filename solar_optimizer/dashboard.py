@@ -122,6 +122,10 @@ def write_dashboard_status(ha, db, plan=None):
         "temp_cool": get_param(db, "temp_factor_cool"),
         "temp_mild": get_param(db, "temp_factor_mild"),
         "temp_warm": get_param(db, "temp_factor_warm"),
+        "sw_scale_spring": get_param(db, "sw_efficiency_scale_spring"),
+        "sw_scale_summer": get_param(db, "sw_efficiency_scale_summer"),
+        "sw_scale_autumn": get_param(db, "sw_efficiency_scale_autumn"),
+        "sw_scale_winter": get_param(db, "sw_efficiency_scale_winter"),
     }
 
     days = db.execute("SELECT COUNT(*) FROM daily_outcome").fetchone()[0]
